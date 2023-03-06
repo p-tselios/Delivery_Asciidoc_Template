@@ -1,0 +1,215 @@
+:pygments-style: tango
+:source-highlighter: pygments
+:toc:
+:toclevels: 7
+:sectnums:
+:sectnumlevels: 6
+:numbered:
+:chapter-label: ch01_07_manage_host_groups
+:icons: font
+ifndef::env-github[:icons: font]
+ifdef::env-github[]
+:status:
+:outfilesuffix: .adoc
+:caution-caption: :fire:
+:important-caption: :exclamation:
+:note-caption: :paperclip:
+:tip-caption: :bulb:
+:warning-caption: :warning:
+endif::[]
+:imagesdir: ./images/
+
+[id='ch01_07_manage_host_groups']
+= Manage IdM Host Groups and Host Automember with Ansible
+
+== Objectives
+
+After completing this section, you should be able to:
+
+* Understand the different strategies regarding the management of IdM Host Groups with Ansible
+* Understand how to write your inventory files for this
+
+=== Managing Host Groups (Overview)
+In contrast to user and user group management, host group management requires a different approach. With user and user group management, the focus is on defining access control policies and managing user accounts. However, with host groups, we want to maintain a lot of control over which hosts belong to which group, and at the same time, maximize the use of automember rules to provide flexibility to system administrators and speed up the lifecycle management of IdM clients.
+
+Automember rules allow us to dynamically assign hosts to host groups based on certain criteria, such as host name patterns, IP address ranges, or other attributes. This can greatly simplify the process of managing a large number of hosts and ensure that they are always assigned to the correct host group.
+
+However, it's important to balance the use of automember rules with the need for control and oversight. We need to ensure that the hosts are properly classified and that access control policies are enforced. For example, we may want to limit access to certain host groups based on security requirements or business policies.
+
+By using Ansible to manage IdM host groups, we can achieve this balance between control and flexibility. Ansible allows us to define playbooks that specify exactly which tasks should be performed on which hosts and in what order. This provides us with fine-grained control over the management of our IdM infrastructure, while still allowing us to take advantage of automember rules to simplify the management of large numbers of hosts.
+
+Using Hostgroups will allow us to simplify the HBAC and SUDO management on each host regardless of the number of them, provided that we have a solid method to distinguih them. For example, if we provision new RHEL systems via Red Hat Satellite server, integrating Red Hat Satellite with Red Hat Identity Management will ensure that every new host is a member of the correct Host Group.As a result of this classification, HBAC and SUDO rules will be applied to the new host automatically, without the need for manual intervention.
+
+By using Ansible to manage IdM host groups, we can automate the management of HBAC and SUDO policies across our entire infrastructure, ensuring that access control policies are consistently applied and reducing the risk of errors and misconfigurations.
+
+The `freeipa.ansible_freeipa` collection provides a comprehensive range of modules regarding the management of hosts and host groups.
+
+=== Strategies for managing host-related data in idm deployments
+
+The discussion should make it clear that there is not a single strategy regarding host-related data and how we store it in the inventory. One approach is to store information about hosts, such as description and userclass, in a file with a representative name and store HBAC and automember rules in separate data structures. This can be a viable option for small IdM deployments. However, in larger IdM deployments, the process of updating information about a host in different places can be tedious and error-prone.
+
+In order to keep data structures as simple as possible, we will focus on a single approach in this book. However, readers are invited to experiment with different strategies and be flexible in their approach. For example, an organization may initially store host information under the host_vars/hostname directory, but later determine that it is not the appropriate strategy for their modus operandi. In such cases, it is important to be able to adapt and modify the inventory data structures to meet the changing needs of the organization.
+
+One important consideration when choosing a strategy for handling host-related data is to ensure that it is scalable and easy to maintain. In larger IdM deployments with hundreds or even thousands of hosts, it can be challenging to keep track of host information and ensure that it is accurate and up-to-date. Therefore, it is important to have clear processes and procedures in place for updating host information, as well as for managing HBAC and automember rules.
+
+=== Managing Host Groups
+
+Following the approach we discussed previously, the documentation page of the `ipahost` module (https://github.com/freeipa/ansible-freeipa/blob/master/README-host.md), provides us with all the available options of it.
+
+.Update host information
+If IdM clients are enrolled with a supported method like the `ipa-client-install` command, directly from a Red Hat Satellite server during the provisioning phase, or by using the `freeipa.ansible-freeipa` roles, we don't have to create new hosts in the IdM manually. Instead, we can update their information, such as their description, SSH public keys, SSL certificates, etc.
+
+As we discussed in previous sections, IdM provides a limited list of attributes for each host. Administrators can use locality, location, or platform to group together hosts with similar attributes. However, these attributes do not provide us with the granularity needed for more specific groupings. For example, there are no attributes that could be used to identify VMs hosting MySQL 10 in the Production environment.
+
+In a Red Hat Satellite server, administrators use host groups to perform fine-tuned grouping of servers like the above. In IdM, this information is stored in the **userclass** attribute, which can be utilized by automember rules to classify a server to the appropriate host group. By utilizing the userclass attribute in conjunction with automember rules, we can classify hosts based on specific attributes such as the type of application running on the host, the version of the software, or any other custom attribute that we define. This provides us with the flexibility needed to manage our infrastructure effectively and efficiently.
+
+If we don't utilize Red Hat Satellite server during the provisioning phase, typically information such as the description of a host or the userclass value is defined as an inventory host or group variable. In the case where we want to add multiple attributes to the userclass parameter, we need to use expressions that are friendly to a regular expression since the latter is used in the automember rules. For example, we could define a userclass value for a group of hosts as "production-webserver-mysql7", where "production" represents the environment, "webserver" represents the application type, and "mysql7" represents the version of the software running on the host. This way, we can use regular expressions in the automember rules to classify hosts based on these attributes.
+
+[source,yaml]
+----
+host_description: "Mysql 10 - Production server"
+host_userclass: "app=MysqlSrv|srvenv=prod"
+----
+
+.Host group data
+For the purposes of this book we will keep the data structures for host groups as simple as possible, in expense of possible data inconsistencies.
+
+[source,yaml]
+----
+rhidm_host_groups_list:
+  - name:  idmhostgroup
+    description: >
+      Database Servers in the production environment
+    state: present
+    automember: yes
+    incrules:
+      - key: userclass
+        expression: "env=prod;app=mysql;deployment_env=prod;[;|~]"
+----
+
+.Writing the Host management task
+The host management task is straightforward and easy to implement. The documentation page (https://github.com/freeipa/ansible-freeipa/blob/master/README-host.md) provides the skeleton for our task.
+
+[source,yaml]
+----
+  - name: Update host data
+    freeipa.ansible_freeipa.ipahost:
+      ipaadmin_principal: "{{ rhidm_host_admin_principal }}"
+      ipaadmin_password: "{{ rhidm_admin_password }}"
+      name: "{{ inventory_hostname }}"
+      ip_address: "{{ ansible_all_ipv4_addresses + ansible_all_ipv6_addresses if rhidm_has_dns | default(false) == true else omit }}"
+      update_dns: "{{ rhidm_has_dns | default(false) }}"
+      userclass: "{{ host_userclass }}"
+      state: present
+  tags:
+    - update_hostdata
+
+----
+
+.Host Automember rules
+The `freeipa.ansible_freeipa`  module we used for managing user group Automember rules can also be used for managing host group Automember rules. In this book, we keep the management of Automember rules specific to their targets. For instance, the Automember rules for user groups are handled by the rhidm_user_groups role. Similarly, we will manage the host group Automember rules from the rhidm_host_groups role.
+
+Another approach is to create a separate role that manages all the Automember rules. There are no clear advantages or disadvantages to each method, so organizations can choose the approach that suits them best.
+
+Management of host groups automembership is similar to the relevant automember rules for users, as discussed in the in the <<user-group-auto-member, Managing the Auto-member rules>> section.
+
+.Writing Host Automember rules
+The host automember rules, provided that we follow the approach of separate data structures is quite simple. An example task is the following:
+
+[source,yaml]
+----
+- name: Manage Host Group Automembers
+  freeipa.ansible_freeipa.ipaautomember:
+    ipaadmin_password: "{{ rhidm_admin_password }}"
+    name: "{{ item.name }}"
+    description: "{{ item.description | default(omit) | trim }}"
+    automember_type: hostgroup
+    state: "{{ item.state | default('present') }}"
+    inclusive: "{{ item.incrules | default(omit) }}"
+    exclusive: "{{ item.excrules | default(omit) }}"
+  loop: "{{ rhidm_hostgroups | json_query('[?automember==`true`]') | list }}"
+  loop_control:
+    label: "{{ item.name }}"
+----
+
+One critical aspect is that devops engineers should handle the management of host groups in tandem. One cannot seperate the automember rules from the host data or the host group information. It is also important to note that some form or data transformation is needed due to the requirements of the `freeipa.ansible_freeipa.ipaautomember` module.
+
+.Writing HBAC Rules
+As discussed already, HBAC rules control user access on the IdM clients. As a minimum a devops engineer provides a name, description a host or hostgroup on which the rule is applied, the users or groups that are affected from this rule and optionally a service.
+
+The documentation of the relevant module (https://github.com/freeipa/ansible-freeipa/blob/master/README-hbacrule.md) verifies that calling the module is straightforward.
+
+A typical data structure of the HBAC rules in the inventory would resemple the following example.
+
+[source,yaml]
+----
+rhidm_hbac_rules:
+  - name: allow_all
+    state: disabled
+
+  - name: hbr_01
+    users:
+      - aba01
+    hosts:
+      - idmc7.home
+    services: <1>
+      - ftp
+----
+
+<1> Services are not extensively used. Typically, services are considered optional and are handled as such in the inventory data structures.
+
+.Applying HBAC rules with Ansible
+HBAC rules management with the `freeipa.ansible_freeipa.ipahbacrule` module follows the same philosophy as other modules where we need to define the rule in 2 distinctive steps.
+
+[source,yaml]
+----
+- name: Manage HBAC rules
+  freeipa.ansible_freeipa.ipahbacrule:
+    ipaadmin_password: "{{ rhidm_admin_password }}"
+    name: "{{ item.name }}"
+    description: "{{ item.description | default(omit) | trim }}"
+    usercategory: "{{ item.usercategory | default('all') if item.usercategory is undefined and item.state | default('present') != 'absent' and item.state | default('present') != 'disabled' else omit }}"
+    hostcategory: "{{ item.hostcategory | default('all') if item.hostcategory is undefined and item.state | default('present') != 'absent' and item.state | default('present') != 'disabled' else omit }}"
+    servicecategory: "{{ item.servicecategory | default('all') if item.service is undefined and item.state | default('present') != 'absent' and item.state | default('present') != 'disabled' else omit }}"
+    host: "{{ item.host | default(omit) }}"
+    hostgroup: "{{ item.hostgroup | default(omit) }}"
+    hbacsvc: "{{ item.service | default(omit) }}"
+    hbacsvcgroup: "{{ item.servicegroup | default(omit) }}"
+    user: "{{ item.user | default(omit) }}"
+    group: "{{ item.usergroup | default(omit) }}"
+    state: "{{ item.state | default('present') }}"
+  loop: "{{ rhidm_hbac_rules }}"
+  loop_control:
+    label: "{{ item.name }}"
+  tags:
+    - rhidm_config
+    - rhidm_config_hbac
+
+- name: Manage HBAC membership
+  freeipa.ansible_freeipa.ipahbacrule:
+    ipaadmin_password: "{{ rhidm_admin_password }}"
+    name: "{{ item.name }}"
+    description: "{{ item.description | default(omit) | trim }}"
+    usercategory: "{{ item.usercategory | default('all') if item.usercategory is undefined and item.state | default('present') != 'absent' and item.state | default('present') != 'disabled' else omit }}"
+    hostcategory: "{{ item.hostcategory | default('all') if item.hostcategory is undefined and item.state | default('present') != 'absent' and item.state | default('present') != 'disabled' else omit }}"
+    servicecategory: "{{ item.servicecategory | default('all') if item.service is undefined and item.state | default('present') != 'absent' and item.state | default('present') != 'disabled' else omit }}"
+    host: "{{ item.host | default(omit) }}"
+    hostgroup: "{{ item.hostgroup | default(omit) }}"
+    hbacsvc: "{{ item.service | default(omit) }}"
+    hbacsvcgroup: "{{ item.servicegroup | default(omit) }}"
+    user: "{{ item.user | default(omit) }}"
+    group: "{{ item.usergroup | default(omit) }}"
+    action: member
+    state: "{{ item.state | default('present') }}"
+  loop: "{{ rhidm_hbac_rules }}"
+  loop_control:
+    label: "{{ item.name }}"
+  tags:
+    - rhidm_config
+    - rhidm_config_hbac
+
+----
+
+The task requires the `rhidm_hbac_rules` variable to have the appropriate structure to support group membership. If we define the group membership in the user's definition, we need to dynamically construct a new variable to hold the group membership information.
+
+This concludes the section.

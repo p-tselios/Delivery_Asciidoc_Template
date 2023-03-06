@@ -1,0 +1,295 @@
+:pygments-style: tango
+:source-highlighter: pygments
+:toc:
+:toclevels: 7
+:sectnums:
+:sectnumlevels: 6
+:numbered:
+:chapter-label: ch01_06_manage_users_groups-ge
+:icons: font
+ifndef::env-github[:icons: font]
+ifdef::env-github[]
+:status:
+:outfilesuffix: .adoc
+:caution-caption: :fire:
+:important-caption: :exclamation:
+:note-caption: :paperclip:
+:tip-caption: :bulb:
+:warning-caption: :warning:
+endif::[]
+:imagesdir: ./images/
+
+
+[id='ch01_06_manage_users_groups-ge']
+= Guided Exercise: Manage users and Groups in IdM
+
+== Outcomes
+You should be able to:
+
+* Create, delete and modify users, user groups and external user groups
+
+
+=== Prerequisites
+
+You have successfully completed the previous Guided Exercises.
+
+TIP: Opening two tabs in the Gnome Terminal can help you to easily switch between the `idm-inventory` and `idm-code` directories.
+
+
+[role='Checklist']
+== Instructions
+
+
+1) Login to your workstation as **student** user and open a new terminal. Ensure that you use the `ansible2.9` Python virtual environment.
+[subs=+quotes]
+----
+[student@workstation ~]$ *source ~/venvs/ansible2.9/bin/activate*
+(ansible2.9)[student@workstation ~]$
+
+----
+
+2) Navigate to the `workshop/idm-code` directory.
+[subs=+quotes]
+----
+(ansible2.9)[student@workstation ~]$ *cd ~/workshop/idm-code*
+
+----
+
+3) Examing the role `rhidm_manage_users`
+
+3.1) Examine the default values of the role's variables. Note the name and the structure of the variables used by the role.
+
+[subs=+quotes]
+----
+(ansible2.9)[student@workstation ~]$ *cat ~/workshop/idm-code/roles/rhidm_manage_users/defaults/main.yml*
+
+----
+
+3.2 Examine the task file to identify the mandatory variables
+[subs=+quotes]
+----
+(ansible2.9)[student@workstation ~]$ *cat ~/workshop/idm-code/roles/rhidm_manage_users/tasks/main.yml*
+
+----
+
+4) Create a list of dictionaries that will represent the IdM users as defined in the following table:
+
+[cols="6", options="header"]
+|===
+|first name |last name | uid |shell |password |state
+| Work | Shop01 | 60000 | /bin/sh | 5evenof9 | present
+| Work | Shop02 | 60001 | Default shell | b0rgque! | present
+| Work | Shop03 | 60002 | /bin/ksh | 1mper1o | absent
+| Work | Shop04 | 60003 | /bin/zsh | Sisko99 | present
+| Work | Shop05 | 60004 | Default shell | Data!23| preserved
+|===
+
+4.1 Open a new tab in your terminal and create a new file in the IdM inventory that will store the user information.
+[subs=+quotes]
+----
+(ansible2.9)[student@workstation ~]$ *vim ~/workshop/idm-inventory/group_vars/rhidms/rhidm_user_data.yml*
+----
+
+[source,yaml]
+----
+---
+
+rhidm_user_list:
+  - first: 'Work'
+    last: 'Shop01'
+    uid: 60000
+    password: !unsafe '5evenof9' #Seven of Nine (Tertiary Adjunct of Unimatrix 01)
+    loginshell: "/bin/sh"
+    state: present
+  - first: "Work"
+    last: "Shop02"
+    uid: 60001
+    password: !unsafe 'b0rgque!' #Locutus of Borg (Jean-Luc Picard)
+  - first: "Work"
+    last: "Shop03"
+    uid: 60002
+    password: !unsafe '1mper1o'  #The Borg Queen
+    loginshell: "/bin/ksh"
+    state: absent
+  - first: "Work"
+    last: "Shop04"
+    uid: 60003
+    loginshell: "/bin/zsh"
+    password: !unsafe 'Sisko99'  #Capt. Benjamin Sisko
+    state: present
+  - first: "Work"
+    last: "Shop05"
+    uid: 60004
+    password: !unsafe 'Data!23'  #Lt. Cmdr. Data
+    state: preserved
+...
+----
+
+5) Include the role `rhidm_manage_users` in your playbook and execute it
+
+5.1) Modify the playbook `+type__rhidm__configure.yml+` to include the role `rhidm_manage_users`
+[subs="verbatim,macros"]
+----
+
+pass:q[[student@workstation ~\]$ *vim  /home/student/workshop/idm-code/type*]__pass:q[*rhidm*]__pass:q[*configure.yml*]
+---
+- name: Configure the RH IDM domain
+  hosts: "{{ __config_host | groups['rhidms_master'][0] | default('localhost') }}"
+  roles:
+    - role: rhidm_configure
+      tags: idm_conf
+
+    - role: rhidm_manage_users
+      tags: idm_users
+...
+----
+
+5.2) Execute the playbook to manage users
+
+[subs="verbatim,macros"]
+----
+pass:q[(ansible2.9)[student@workstation ~\]$ *cd ~/workshop/idm-code/*]
+pass:q[(ansible2.9)[student@workstation ~\]$ *ansible-playbook --ask-vault-pass \
+ -i ../idm-inventory ./type*]__pass:q[*rhidm*]__pass:q[*configure.yml*]
+
+ ...output ommitted...
+
+TASK [rhidm_manage_users : Manage users] *****************************************************************************************
+changed: [idm.lab.example.net] => (item=WShop01 - present)
+changed: [idm.lab.example.net] => (item=WShop02 - present)
+ok: [idm.lab.example.net] => (item=WShop03 - absent)
+changed: [idm.lab.example.net] => (item=WShop04 - present)
+ok: [idm.lab.example.net] => (item=WShop05 - absent)
+
+TASK [rhidm_manage_users : Apply roles to users] *********************************************************************************
+
+PLAY RECAP ***********************************************************************************************************************
+idm.lab.example.net        : ok=6    changed=1    unreachable=0    failed=0    skipped=1    rescued=0    ignored=0
+
+----
+
+6) Create a list of dictionaries that will represent the IdM groups as defined in the following table:
+
+[cols="5", options="header"]
+|===
+|Group name
+| GID
+| Description
+| POSIX/External
+| Members
+
+| WSGroup01
+| 120000
+| The first group of the workshop
+| POSIX
+a| WShop01 +
+   WShop04
+
+| WSGroup02
+| N/A
+| An external group
+| External
+| N/A
+|===
+
+In addition, group `WSGroup01` should have an **automember** rule so all users for which their username starts with `wsgroup` followed by two numbers between `0` and `2` should be members of this group.
+
+6.1)  Open a new tab in your terminal and create a new file in the IdM inventory that will store the group information.
+[subs=+quotes]
+----
+(ansible2.9)[student@workstation ~]$ *vim ~/workshop/idm-inventory/group_vars/rhidms/rhidm_group_data.yml*
+----
+[source,yaml]
+----
+---
+  - name: WSGroup01
+    description: >
+      The first group of the workshop
+    users:
+      - wshop01
+      - wshop04
+    automember_state: present
+    automember_description: "Workstop IdM users"
+    automember_incrules:
+      - key: cn
+        expr: '^wshop0[0-2].*'
+        state: present
+    state: present
+
+  - name: WSGroup02
+    description: "An external group"
+    gid: 120000
+    external: true
+...
+----
+
+[WARNING]
+====
+If the module variable `externalmember` is specified, you need define the `external: true`, otherwise the task will fail.
+====
+
+[WARNING]
+====
+Please remember that the module variables `external`, `posix`, `nonposix` are mutually exclusive.
+====
+
+[NOTE]
+====
+Due to a bug in the `freeipa.ansible_freeipa` collection adding external users to an external group is successful on the first execution of a playbook, but subsequent tasks will fail. Thus, we don't add any `externalmember` in the variable.
+====
+
+7) Include the role `rhidm_manage_groups` in your playbook and execute it
+
+5.1) Modify the playbook `+type__rhidm__configure.yml+` to include the role `rhidm_manage_groups`
+[subs="verbatim,macros"]
+----
+
+pass:q[[student@workstation ~\]$ *vim  /home/student/workshop/idm-code/type*]__pass:q[*rhidm*]__pass:q[*configure.yml*]
+---
+- name: Configure the RH IDM domain
+  hosts: "{{ __config_host | groups['rhidms_master'][0] | default('localhost') }}"
+  roles:
+    - role: rhidm_configure
+      tags: idm_conf
+
+    - role: rhidm_manage_users
+      tags: idm_users
+
+    - role: rhidm_manage_groups
+      tags: idm_groups
+...
+----
+
+5.2) Execute the playbook to manage users
+
+[subs="verbatim,macros"]
+----
+pass:q[(ansible2.9)[student@workstation ~\]$ *cd ~/workshop/idm-code/*]
+pass:q[(ansible2.9)[student@workstation ~\]$ *ansible-playbook --ask-vault-pass \
+ -i ../idm-inventory ./type*]__pass:q[*rhidm*]__pass:q[*configure.yml*]
+
+ ...output ommitted...
+
+TASK [rhidm_manage_groups : Manage the IdM User groups] **************************************************************************
+pass:q[*changed*]: [idm.lab.example.net] => (item=WSGroup01 - present)
+pass:q[*changed*]: [idm.lab.example.net] => (item=WSGroup02 - present)
+
+TASK [rhidm_manage_groups : Build the automember variables] **********************************************************************
+ok: [idm.lab.example.net]
+
+TASK [rhidm_manage_groups : Create or delete Automember rules for Users] *********************************************************
+pass:q[*changed*]: [idm.lab.example.net] => (item=WSGroup01 - present)
+
+TASK [rhidm_manage_groups : Add Automember conditions] ***************************************************************************
+pass:q[*changed*]: [idm.lab.example.net] => (item=WSGroup01)
+
+TASK [rhidm_manage_groups : Remove Automember conditions] ************************************************************************
+
+pass:q[*RUNNING HANDLER*] [rhidm_manage_groups : Rebuild User Group membership] ************************************************************
+pass:q[*changed*]: [idm.lab.example.net]
+
+PLAY RECAP ***********************************************************************************************************************
+idm.lab.example.net        : ok=6    changed=4    unreachable=0    failed=0    skipped=1    rescued=0    ignored=0
+----
+
+This concludes the section.

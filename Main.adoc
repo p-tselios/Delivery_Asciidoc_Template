@@ -1,7 +1,8 @@
 = {subject}
-:subject: <Subject for cover goes here>
-:description:  <Description for cover goes here>
-Travis Michette <tmichett@redhat.com>
+:subject: Custom Course, Configure Identity Management with Ansible
+:description:
+Travis Michette <tmichett@redhat.com> +
+Petros Tselios <ptselios@redhat.com>
 :doctype: book
 :customer:  GLS
 :listing-caption: Listing
@@ -11,7 +12,7 @@ Travis Michette <tmichett@redhat.com>
 :sectnumlevels: 6
 :numbered:
 :chapter-label:
-:pdf-page-size: LETTER
+:pdf-page-size: A4
 :icons: font
 :imagesdir: images/
 // The IF Statements don't always work. So must comment out and uncomment based on ePub or PDF

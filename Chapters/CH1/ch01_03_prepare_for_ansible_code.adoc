@@ -1,0 +1,332 @@
+:pygments-style: tango
+:source-highlighter: pygments
+:toc:
+:toclevels: 7
+:sectnums:
+:sectnumlevels: 6
+:numbered:
+:chapter-label: ch01_03_rhidm-prepare-for-ansible
+:icons: font
+ifndef::env-github[:icons: font]
+ifdef::env-github[]
+:status:
+:outfilesuffix: .adoc
+:caution-caption: :fire:
+:important-caption: :exclamation:
+:note-caption: :paperclip:
+:tip-caption: :bulb:
+:warning-caption: :warning:
+endif::[]
+:imagesdir: ./images/
+
+[id='ch01_03_rhidm-prepare-for-ansible']
+= Prepare to use Ansible
+
+== Objectives
+
+After completing this section, you should be able to:
+
+* Understand how to add Ansible collections to your local repository
+* Understand how to use the Red Hat IDM Collection (ansible-freeipa)
+
+== Ansible Configuration File (Overview)
+
+=== Ansible Config
+
+The *ansible.cfg* file controls how the *ansible* and *ansible-playbook* commands are run and interpreted. The configuration file has two (2) main sections that are commonly used, but include other sections as well. For the purpose of understanding how Ansible works, we will examine both the *[defaults]* section and the *[privilege_escalation]* section.
+
+.*ansible.cfg* Defaults Section
+[source,bash]
+----
+[defaults]
+inventory = inventory <1>
+remote_user = devops <2>
+----
+<1> Specifies which inventory file Ansible will use
+<2> Specifies the remote user to be used by *ansible* or *ansible-playbook* commands.
+
+[NOTE]
+====
+A perfectly acceptable *ansible.cfg* might only have a [defaults] section specifying the inventory to be used.
+====
+
+The *[privilege_escalation]* of the Ansible configuration file defines how Ansible will run when additional privileges need to be provided. This often leverages `SUDO` and generally uses the *root* user, however, there are instances in which the privileged user is something other than root. The *become* and *become_ask_pass* options instruct Ansible whether it should attempt to become a privileged user by default as well as whether Ansible will prompt for the password.
+
+.*ansible.cfg* Privilege Escalation Section
+[source,bash]
+----
+[privilege_escalation]
+become = False <1>
+become_method = sudo <2>
+become_user = root <3>
+become_ask_pass = False <4>
+----
+<1> Sets default behavior whether to elevate privileges
+<2> Sets method for privilege escalation
+<3> Sets username of privileged user
+<4> Sets option on whether or not user is prompted for password when perfoming privilege escalation.
+
+[NOTE]
+====
+Typically, the remote user we define in the ansible.cfg file can execute sudo commands without password. In our lab we lack this user, thus we will use `root` as the remote user.
+====
+
+.Ansible Config File Precedence
+* *ANSIBLE_CONFIG* - Environment Variable (highest)
+* *ansible.cfg* - Config file in current working directory (most common and recommended)
+* *~/.ansible.cfg* - Ansible config file in the home directory
+* */etc/ansible/ansible.cfg* - Ansible's installed default location (lowest)
+
+== Ansible Playbooks (Overview)
+
+=== Ansible Playbooks
+
+Ansible playbooks contain one or more tasks to execute against specified inventory nodes. Playbooks consist of one or more play and each play in a playbook consists of one or more tasks. Ansible playbooks and tasks are all about *key:value* pairs and *lists*. Understanding this basic format allows someone developing Ansible to form playbooks that are easier to create, troubleshoot/debug, and for someone else to understand.
+
+=== Playbook Basics
+
+An Ansible playbook is written/formatted in YAML so horizontal whitespace is critical and often the most troublesome part of debugging new Ansible playbooks. Playbooks have a general structure for the plays with directives such as: *name*, *hosts*, *vars*, *tasks*, and more. These play-level directives help form a readable structure much like *task-level* directives.
+
+.Play Structure Components
+[source,yaml]
+----
+---
+- name: install and start apache <1>
+  hosts: web <2>
+  become: yes <3>
+
+  tasks: <4>
+----
+<1> Name of **play** in playbook
+<2> List of hosts from inventory to execute play against *(required)*
+<3> Directive to override *ansible.cfg* and elevate privileges
+<4> Beginning of *tasks* section.
+
+There can be other directives here, but at the most basic playbook, you will generally always see a *hosts* and a *tasks* section.
+
+The first indentation level in a playbook denoted by *-* is the list of plays and this level will contain the *key:value* pairs that correspond to Ansible playbook directives. Understanding this and developing good habits and standards for indentations allows Ansible users to create playbook skeletons which help tremendously during the development/debugging cycle.
+
+=== Running Playbooks
+
+Playbooks can be run just like Ansible *ad-hoc* commands. In order to execute or run a playbook, it is necessary to use the *ansible-playbook* command and specify the playbook. The additional options available for the *ad-hoc* commands such as: *-e*, *-K*, *-b*, and others all still apply and perform the same functions when leveraged with the *ansible-playbook* command.
+
+
+== Ansible Collections (Overview)
+
+Ansible 2.9 introduced the concept of collections and provided mapping for Ansible modules that were moved into a collection namespace. Ansible 2.9 provided a mapping of the new module locations in collections and this mapping automatically works for existing Ansible playbooks in the initial versions of Ansible Automation Platform.
+
+.Ansible Module and Collection Mapping
+[NOTE]
+====
+https://github.com/ansible/ansible/blob/devel/lib/ansible/config/ansible_builtin_runtime.yml
+====
+
+=== Using Ansible Automation Platform Collections
+
+Collections allowed development of Ansible core components to be separated from module and plug-in development. Upstream Ansible (the Ansible Project) unbundled modules from the Ansible core code beginning with Ansible Base (core) 2.10/2.11. Newer versions of Ansible require collections to be installed in order for modules to be available for Ansible. Playbooks should be developed using the **FQCNs** (fully-qualified connection names) when referring to modules in tasks. Existing playbooks can be fixed easily to work with collections, but it is better to re-write the playbooks to use the fully-qualified collection name (FCQN).
+
+.Downloading Collections
+[NOTE]
+====
+Collections modules can are brought into the Ansible project and leveraged via three ways:
+
+. A *requirements.yml* file in a sub-directory called *collections* within the directory housing the playbooks and using the *ansible-galaxy collection install -r *collections/requirements.yml* command.
+. When using Ansible Automation Controller, Automation Controller can read the *requirements.yml* file and install collections automatically.
+. It is also possible to install Ansible collections directly from a *TGZ* file or from Ansible Galaxy using the *+ansible-galaxy+* command on the command line.
+
+It should be noted that the preferred method is leveraging a *requirements.yml* file.
+====
+
+.Configuring Ansible to Use Collections
+
+The *ansible.cfg* file controls how Ansible behaves and the basic runtime configuration options. The *[defaults]* section specifically needs to be updated so that Ansible can make use of Ansible collections. It is a common practice to install Ansible Collections in the current working directory of a project. In order for Ansible to look for these collections, the path must be specified in the *ansible.cfg* file.
+
+[NOTE]
+====
+The *collections_paths* directories are separated by a *:* in the *ansible.cfg* file.
+====
+
+[subs=+quotes]
+----
+*[student@workstation my_project]$ cat ansible.cfg*
+[defaults]
+remote_user = root
+inventory = inventory
+*collections_paths = ./collections:~/.ansible/collections:/usr/share/ansible/collections:* <1>
+
+[privilege_escalation]
+become = False
+become_method = sudo
+become_user = root
+become_ask_pass = False
+----
+<1> Specifies the general locations for Ansible to look for the installed Ansible Collections and modules
+
+=== Installing and Using Ansible Collections
+
+Ansible collections are installed in a variety of ways using a variety of methods. One of the most common ways for Infrastructure-as-Code (IaC) style projects is the use of a *requirements.yml* file where the *ansible-galaxy* command is used to install the collection prior to the running of the playbook. Ansible playbooks are a convenient method to manage system administration and configuration in an Infrastructure as Code format, because Ansible playbooks are text files that can be easily managed within version control. Having only the *requirements.yml* file as part of the project ensures that the most current roles, collections, and modules are available and present when the code is used a second time. This also allows Ansible Controller to install the collection and modules just before the Job Template Workflow has been run.
+
+[WARNING]
+====
+When leveraging the *requirements.yml* file to install new roles or collections, there is always a possibility that there could be changes to the modules and syntax provided. When using a *requirements.yml* file, it is good practice to test regularly ensuring any changes to collections, modules, and roles don't break playbook functionality.
+====
+
+There are some arguments that can be made to have the collection content with the project so that it is static and "known good" to be tested with the playbooks and this is something that the development/administration team maintaining the Ansible playbooks and repositories must decide.
+
+It is possible to install collections directly from Ansible Galaxy using the installation method described in the instructions.
+
+[subs=+quotes]
+----
+*ansible-galaxy collection install freeipa.ansible_freeipa*
+----
+
+While the above command works, it is considered to be better practice to install the modules, collections, and roles in the current working directory, in a sub-directory called *collections* located on the same level as the playbooks.
+
+
+[subs=+quotes]
+----
+*ansible-galaxy collection install freeipa.ansible_freeipa -p collections/*
+----
+
+The command above will install the *freeipa.ansible_freeipa* collections in the current working directory in a sub-directory called collections. The *ansible.cfg* file that specified the collections search path will know to look for collections in the newly installed location.
+
+The most common way of installing the Ansible collections is using the *requirements.yml* file.
+
+[subs=+quotes]
+----
+[student@workstation my_project]$ *cat requirements.yml*
+collections:
+- name: *ansible.posix*
+----
+
+The above file will look for the *ansible.posix* collection to install. Since no location was specified, it will automatically look to install the collection from Ansible Galaxy.
+
+[subs=+quotes]
+----
+[student@workstation idm-code]$ *ansible-galaxy collection install -r collections/requirements.yml -p collections/* <1>
+----
+<1> Assumes there is a collection directory in current working directory with a file called *requirements.yml*
+
+[IMPORTANT]
+====
+It is important to note that the *ansible.cfg* file controls where and how Ansible searches for installed collections. If a collection is installed for use and isn't properly referenced in the *ansible.cfg* Ansible will be unable to find and use modules from the installed collection.
+====
+
+
+== The Red Hat IdM Ansible Collection
+
+Red Hat provides the *rhel_idm Ansible Collection* that is fully supported with modules, roles, and other components to assist with the automation and management of Red Hat Identity Management Server. This collection is available through the Red Hat Ansible Automation Platform (AAP) subscription at (https://console.redhat.com/ansible/automation-hub/repo/published/redhat/rhel_idm/).
+
+Collections, modules, roles, and playbooks located on Ansible Galaxy are considered *Upstream* content and are not supported by Red Hat. The *freeipa.ansible_freeipa* collection is the upstream collection to manage Red Hat Identity Management Server and documentation is available at (https://github.com/freeipa/ansible-freeipa/). Even for the official  *rhel_idm Collection* collection's documentation is in the Github upstream project.
+
+At the time of this writing, *freeipa.ansible_freeipa* latest version is 1.9.2. The collection contains 99 modules and 6 roles. Throughout the course we will be using only a few of them.
+
+Some of those modules are used from the roles in order to automate the deployment IdM servers and clients.
+
+It is possible to get a listing of those modules from the system after they are installed.
+
+[subs=+quotes]
+----
+[student@workstation Testing]$ *ls collections/ansible_collections/freeipa/ansible_freeipa/plugins/modules*
+./ipaautomember.py                     ./ipahostgroup.py                            ./ipaselfservice.py
+./ipaautomountkey.py                   ./ipahost.py                                 ./ipaserver_enable_ipa.py
+./ipaautomountlocation.py              ./ipaidrange.py                              ./ipaserver_load_cache.py
+./ipapermission.py                           ./ipaserver.py
+... OUTPUT OMITTED ...
+
+./ipahbacrule.py                       ./ipareplica_setup_otpd.py                   ./ipatrust.py
+./ipahbacsvcgroup.py                   ./ipareplica_test.py                         ./ipauser.py
+./ipahbacsvc.py                        ./iparole.py                                 ./ipavault.py
+
+----
+
+=== Installing freeipa.ansible_freeipa Ansible Collection
+
+In our lab we will use the upstream version of the collection due to the fact that we don't have the necessary AAP subscriptions installed in our lab. In most instances, subscribers with AAP entitlements will leverage Ansible Automation Hub to install any supported Ansible content collection that is needed.
+
+.Using the upstream collection
+
+To install the upstream collection, provided that your Ansible control node has Internet Access you can utilize any of the methods we described in the previous section, for example by using the `ansible-galaxy` command.
+
+.Using the Supported Red Hat collection
+
+The supported Red Hat Satellite collection is available from (https://console.redhat.com/ansible/automation-hub/repo/published/redhat/rhel_idm/). It can be installed similar to the collections from Ansible Galaxy and the Red Hat Hybrid Cloud Console provide the information on how to install the collection.
+
+[subs=+quotes]
+----
+*ansible-galaxy collection install rhel_idm*
+----
+
+The command to install the collection is the same as Ansible Galaxy. In order to properly install collections from Ansible Automation Hub, the *ansible.cfg* file must be modified so that it can login and authenticate to Automation Hub and so that it knows the URL and collection information
+
+
+[IMPORTANT]
+====
+The *ansible-galaxy* command leverages the *ansible.cfg* file just as the *ansible* and *ansibe-playbook* commands. Having a *[galaxy] section in the file provides the configurations and URLs needed for the *ansible-galaxy* command to use authentication and have the URLs to connect.
+====
+
+=== Playbook or roles strategy
+
+When it comes to configuring a system such as IdM with Ansible, there are various methodologies that one can follow. One such methodology is to create a playbook of playbooks, where a playbook calls other playbooks responsible for the configuration of various IdM topics. Each playbook in this scenario would call one or two roles to achieve a specific topic such as user and group management.
+
+Another option is to create a playbook that calls multiple and targeted roles. In this approach, we need to use Ansible tags to configure a specific topic.
+
+There are advantages and disadvantages to each option, and it is ultimately a matter of personal preference which one is used, but bear in mind that using small roles that are dedicated to perform a specific task is closer to the reusability target of Ansible Roles.
+
+Both methodologies involve defining variables either under a specific inventory group or in a separate file. The advantage of creating a playbook of playbooks is that it allows for more fine-grained control over the configuration of specific topics, while the general-purpose playbook approach provides a more streamlined approach.
+
+However, regardless of the chosen methodology,using Ansible tags we ensure that only the tasks we want are executed if needed. This can greatly speed up the configuration process and avoid unnecessary changes. Ultimately, the choice of methodology depends on the specific needs and preferences of the user, and both approaches can be effective for configuring IdM with Ansible.
+
+In the following sections we will use the second approach. As one can read in the https://github.com/redhat-cop/automation-good-practices/blob/main/structures/README.adoc["Automation structures, or how to name your playbooks", window=_new], an IdM configuration playbook could be named as `+type__rhidm__configure.yml+`
+
+[subs="verbatim,macros"]
+----
+
+pass:q[[student@workstation ~\]$ *cd  ~/workshop/idm-code*]
+pass:q[[student@workstation ~\]$ *cat ./type*]__pass:q[*rhidm*]__pass:q[*configure.yml*]
+---
+- name: Configure the RH IDM domain
+  hosts: "{{ __config_host | groups['rhidms_master'][0] | default('localhost') }}" <1>
+  roles:
+    - rhidm_configure
+
+...
+----
+
+<1> If the controller node is an IdM client, we can use it node for the configuration of IdM, otherwise we need to define another IdM client or server.
+
+=== Directory structure for the Ansible code
+The directory structure we will use for our automation includes two main directories:
+
+collections::
+It is used to store reusable modules, plugins, and other content that can be shared across multiple playbooks. Collections can be used to organize and package playbooks, roles, and other content into a single, easily distributable package. Ansible Galaxy, the official Ansible community hub, provides a large collection of pre-built content that can be used in your own playbooks. In addition to Ansible Galaxy, Red Hat Automation Hub is another hub for sharing and distributing Ansible content. Red Hat Automation Hub is a curated collection of automation content provided by Red Hat and its partners. This includes pre-built Ansible roles, modules, and playbooks that are designed to work with Red Hat products and technologies.
+
+roles::
+It is used to organize playbooks into reusable units called **roles**. A role is essentially a collection of tasks, files, templates, and other content that can be applied to multiple hosts or groups of hosts. By organizing your playbooks into roles, you can make them more modular and easier to maintain. Roles can also be shared across playbooks, making it easy to reuse common functionality across different projects. Overall, the directory structure we use is designed to promote modularity and reusability, making it easier to manage large and complex infrastructure.
+
+Thus, a directory structure like the following is an excellent starting poing.
+
+.Initial directory structure for Ansible code
+[subs=+quotes]
+----
+
+(ansible2.9)[student@workstation ~]$
+tree
+.
+├── collections
+└── roles
+
+----
+
+[role="References"]
+[NOTE]
+====
+
+https://access.redhat.com/documentation/en-us/red_hat_enterprise_linux/8/html/configuring_and_managing_identity_management/configuring-global-idm-settings-using-ansible-playbooks_configuring-and-managing-idm[Configuring global IdM settings using Ansible playbooks, window=_new]
+
+https://github.com/freeipa/ansible-freeipa[Ansible roles and modules for FreeIPA, window=_new]
+
+https://github.com/freeipa/ansible-freeipa/blob/master/README-config.md[ansible-freeipa: Config Module, window=_new]
+
+https://github.com/redhat-cop/automation-good-practices/blob/main/structures/README.adoc["Automation structures, or how to name your playbooks", window=_new]
+====

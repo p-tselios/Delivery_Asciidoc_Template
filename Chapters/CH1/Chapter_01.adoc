@@ -1,0 +1,282 @@
+:pygments-style: tango
+:source-highlighter: pygments
+:toc:
+:toclevels: 7
+:sectnums:
+:sectnumlevels: 6
+:numbered:
+:chapter-label:
+:icons: font
+ifndef::env-github[:icons: font]
+ifdef::env-github[]
+:status:
+:outfilesuffix: .adoc
+:caution-caption: :fire:
+:important-caption: :exclamation:
+:note-caption: :paperclip:
+:tip-caption: :bulb:
+:warning-caption: :warning:
+endif::[]
+:imagesdir: ./images/
+
+= IdM Configuration with Ansible
+
+== Objectives
+
+After completing this section, you should be able to create and manage Ansible Playbooks and Ansible Inventories in  Git repositories, following recommended practices.
+
+=== Prerequisites
+
+As soon as we have an IdM cluster installed, we can start it's configuration by using the relevant Ansible modules. In this section we will examine what are the requirements to do so, which options can be configured as well as an example playbook we will use to configure some basic parameters.
+
+The prerequisites to use Ansible for the configuration of IdM are:
+
+* You know the IdM administrator password.
+* You have configured your Ansible control node to meet the following requirements:
+** You are using Ansible version 2.8 or later.
+** You have installed the ansible-freeipa package on the Ansible controller.
+** You have created an Ansible inventory file with the fully-qualified domain name (FQDN) of the IdM server.
+
+Since we will need to use some secrets, like the administrator's password, we will use a vault to store those secrets. Thus, you must know the password of the vault file in order to use its variables in the playbooks.
+
+=== How to structure your Ansible code and variables
+
+There are various methodologies regarding the organization of Ansible playbooks, roles and inventories. In this section, we will discuss the benefits of using separate directories for Ansible roles, collections, and playbooks and the Ansible inventory.
+
+By separating these resources, it can provide several advantages, such as easier management of sensitive information, simplified version control, and improved management of different operating environments. This approach can help reduce the risk of errors and simplify the management of complex IT infrastructures.
+
+=== Create your inventory structure
+
+Typically, an inventory file is named `inventory` or hosts and it's stored in the same directory as your playbooks. However, an inventory can nevertheless be also a directory containing:
+
+* list(s) of hosts
+* list(s) of groups, with sub-groups and hosts belonging to those groups
+* dynamic inventory plug-ins configuration files
+* dynamic inventory scripts (deprecated but still simple to use)
+* structured host_vars directories
+* structured group_vars directories
+
+The recommendation is to start with such a structure and extend it step by step.
+
+Having this in our mind, we can start working on our directory structure for both the inventory and the playbooks and roles that we will use for the IdM configuration.
+
+Create the directories that will hold your inventory and the roles, playbooks, collections that you will use for the configuration of IdM:
+
+[subs=+quotes]
+----
+[student@workstation ~]$  *mkdir -p /home/student/workshop/idm-{inventory,code}*
+----
+
+Create the structure of your inventory directory:
+
+[subs=+quotes]
+----
+[student@workstation ~]$ *cd  /home/student/workshop/idm-inventory*
+[student@workstation ~]$ *mkdir ./{group,host}_vars*
+----
+
+Following the recommended practices for the inventories, we can start with an inventory in a single file, in the `INI` format.
+
+NOTE: In case you want to use the same inventory file in order to deploy IdM Servers and to enroll clients using the `rhel_idm` collections, you must follow the naming conventions defined in the https://github.com/freeipa/ansible-freeipa/blob/master/README.md[ansible-freeipa Github page].
+
+
+Create an inventory file in INI format that will have at least one group and the IdM server:
+
+[subs=+quotes]
+----
+[student@workstation ~]$ *cat ./inventory*
+[all]
+idm.lab.example.net
+replica1.lab.example.net
+replica2.lab.example.net
+
+[rhidm_master]
+idm.lab.example.net
+
+[rhidm_replicas]
+replica1.lab.example.net
+replica2.lab.example.net
+
+[rhidms:children]
+rhidm_master
+rhidm_replicas
+----
+
+==== Manage your variables
+
+Ansible has 22 levels of variable precedence, which can be difficult to keep track of and may lead to unexpected behavior if not properly managed. Therefore, it is recommended to reduce the number of variable types to simplify and oversee the list of variables.
+
+Moreover, the use of playbook variables is also not recommended as it blurs the separation between code and data. This applies to all constructs, including specific variable files as part of the play, such as "include_vars". Instead, it is best to use inventory variables, which represent your desired state. These variables have their own internal precedence, with group variables taking precedence over host variables.
+
+In summary, simplifying your variables and using inventory variables instead of playbook variables can help avoid confusion and ensure a clear separation of code and data. Additionally, organizing your inventory directory can make it easier to manage and maintain.
+
+Assuming you already have an inventory file, the next logical step is to create the appropriate directories under your inventory. This will help keep your inventory organized and easy to manage.
+
+[subs=+quotes]
+----
+
+[student@workstation ~]$ *cd  /home/student/workshop/idm-inventory*
+[student@workstation ~]$ *mkdir -p ./group_vars/rhidm{s,_master,_replicas}*
+[student@workstation ~]$ *mkdir -p ./host_vars/{idm,replica1,replica2}.lab.example.net*
+
+----
+
+Organizing Ansible variables in separate files with appropriate names can help improve the organization and maintainability of your code. By separating variables into different files based on their purpose, you can easily locate and modify them when needed. This can also prevent errors caused by variables being defined in multiple places or with conflicting values. Additionally, using descriptive file names can make it easier for other team members to understand the purpose of the variables and their associated tasks. Overall, organizing variables in separate files with appropriate names can help make your Ansible code more organized, maintainable, and collaborative.
+
+Naming conventions for Ansible variables are important for ensuring consistency and clarity in your code. One commonly used practice is to use **prefixes** to indicate the purpose or scope of the variable. For example, you might use "host_" to indicate a variable that applies to a specific host, or "groupname_" for a variable that applies to a specific group of hosts. This can help prevent conflicts between variables with similar names but different purposes.
+
+Another good practice is to use **descriptive** names that reflect the intended purpose of the variable. For example, if a variable is used to specify the version of a software package, you might name it `package_version`. This can help make the code more understandable and make it easier for other team members to modify the code.
+
+Additionally, it's important to avoid using reserved keywords or special characters in variable names, as this can cause errors or unexpected behavior. Overall, following consistent and descriptive naming conventions for Ansible variables can help make your code more readable, understandable, and maintainable.
+
+==== Location of IdM related variables
+
+When defining variables for an IdM configuration in Ansible, we have the option of defining them under the `rhidm_master` inventory group or under the `rhidms` group. By using the `rhidms` group, we gain more flexibility since we can use any of the IdM servers to configure our domain. This means that we are not limited to configuring our domain only on the master server, but can use any of the available servers in our inventory.
+
+This flexibility is particularly useful in larger environments where we may have multiple IdM servers serving different functions. For example, we may have one server dedicated to user authentication and another server dedicated to managing DNS. By defining the variables under the `rhidms` group, we can easily configure the necessary components on each server without having to switch between different inventory groups.
+
+It's important to note that when defining variables under the `rhidms` group, we must ensure that the variables are applicable to all the servers in the group. This means that we must take into account any server-specific configuration that may be required. Additionally, we must ensure that we have defined the necessary variables for all the servers in the group before running the playbook, as any missing variables can cause the playbook to fail.
+
+In summary, by defining variables under the `rhidms` inventory group, we gain more flexibility in configuring our IdM domain, allowing us to use any available server in our inventory. However, we must ensure that the variables are applicable to all servers in the group and that we have defined all the necessary variables before running the playbook.
+
+=== Global IdM configuration options
+
+As part of our global IdM configuration we want to:
+
+* Define `/bin/bash` as the default shell for all users.
+* Set the default group for new users
+* Set the default e-mail domain
+* Set the default domain resolution order
+
+NOTE: In RHEL 9 and later versions, it is possible to define parameters such as automatic SID creation for new users, the NETBIOS name of the server, or the addition of SID to existing users and groups.
+
+Please refer to the Reference section for a list of all the global IdM options that can be modified by Ansible roles.
+
+To modify the global IdM configuration options we use the `ansible-freeipa.config` module. The module uses the following variables for the items we want to modify:
+
+* defaultshell
+* defaultgroup
+* emaildomain
+* domain_resolution_order
+
+Following the described good practices, we store the values of these variables in a file with a descriptive name, for example `rhidms_global_configuration.yml`
+
+[subs=+quotes]
+----
+
+[student@workstation ~]$ *cd  /home/student/workshop/idm-inventory/group_vars/rhidms*
+[student@workstation ~]$ *cat ./rhidms_global_configuration.yml*
+---
+
+# Default shell for new users
+defaultshell: "/bin/bash"
+
+# Default group that all new users will be members to
+defaultgroup: "idmusers"
+
+# Default email domain for the new users
+emaildomain: "example.net"
+
+# Set list of domains used for short name qualification
+domain_resolution_order:
+  - lab.example.net
+  - example.net
+...
+
+----
+
+=== Playbook or roles strategy
+
+When it comes to configuring a system such as IdM with Ansible, there are various methodologies that one can follow. One such methodology is to create a playbook of playbooks, where a playbook calls other playbooks responsible for the configuration of various IdM topics. Each playbook in this scenario would call one or two roles to achieve a specific topic such as user and group management.
+
+Another option is to create a playbook that calls a general-purpose IdM configuration playbook that in turn calls different roles. In this approach, we need to use Ansible tags to configure a specific topic. There are advantages and disadvantages to each option, and it is ultimately a matter of personal preference which one is used.
+
+Both methodologies involve defining variables either under a specific inventory group or in a separate file. The advantage of creating a playbook of playbooks is that it allows for more fine-grained control over the configuration of specific topics, while the general-purpose playbook approach provides a more streamlined approach.
+
+However, regardless of the chosen methodology, it is important to use Ansible tags to ensure that only the necessary tasks are executed. This can greatly speed up the configuration process and avoid unnecessary changes. Ultimately, the choice of methodology depends on the specific needs and preferences of the user, and both approaches can be effective for configuring IdM with Ansible.
+
+In the following sections we will use the first approach. As one can read in the https://github.com/redhat-cop/automation-good-practices/blob/main/structures/README.adoc["Automation structures, or how to name your playbooks", window=_new], an IdM configuration playbook could be named as `+type__rhidm__configure.yml`
+
+[subs="verbatim,macros"]
+----
+
+pass:q[[student@workstation ~\]$ *cd  /home/student/workshop/idm-inventory*]
+pass:q[[student@workstation ~\]$ *cat ./type*]__pass:q[*rhidm*]__pass:q[*configure.yml*]
+---
+- name: Configure the RH IDM domain
+  hosts: "{{ __config_host | groups['rhidms_master'][0] | default('localhost') }}" <1>
+  roles:
+    - rhidm_global_configuration
+
+...
+----
+
+<1> If the controller node is an IdM client, we can use it node for the configuration of IdM, otherwise we need to define another IdM client or server.
+
+
+
+====
+
+////
+
+
+.*Guided Exercise: Configuring the Classroom Environment*
+====
+
+aa
+
+====
+
+
+
+for example inventory.file, and define the IdM server from which you want to retrieve the IdM configuration in the [ipaserver] section. For example, to instruct Ansible to retrieve the data from server.idm.example.com, enter:
+
+
+The example assumes that in the ~/MyPlaybooks/ directory, you have created an Ansible inventory file with the fully-qualified domain name (FQDN) of the IdM server.
+        The example assumes that the secret.yml Ansible vault stores your ipaadmin_password.
+////
+
+
+
+.Example Code box for CLI
+[source,bash]
+----
+[student@workstation ~]$ sudo yum module install container-tools
+----
+
+.Example Code box for YAML
+[source,yaml]
+----
+---
+- name: Deploy HTTPD Server Demo
+  hosts: server
+  collections:
+
+  tasks:
+
+## Start and Run the HTTPD Container
+    - name:  Start the Apache Container
+      podman_container:
+----
+
+
+// .*Guided Exercise: Configuring the Classroom Environment*
+//
+// ====
+//
+//
+// ====
+
+
+[role="References"]
+[NOTE]
+====
+
+https://access.redhat.com/documentation/en-us/red_hat_enterprise_linux/8/html/configuring_and_managing_identity_management/configuring-global-idm-settings-using-ansible-playbooks_configuring-and-managing-idm[Configuring global IdM settings using Ansible playbooks, window=_new]
+
+https://github.com/freeipa/ansible-freeipa[Ansible roles and modules for FreeIPA, window=_new]
+
+https://github.com/freeipa/ansible-freeipa/blob/master/README-config.md[ansible-freeipa: Config Module, window=_new]
+
+https://github.com/redhat-cop/automation-good-practices/blob/main/structures/README.adoc["Automation structures, or how to name your playbooks", window=_new]
+====

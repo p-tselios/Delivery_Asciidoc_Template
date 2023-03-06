@@ -1,0 +1,218 @@
+:pygments-style: tango
+:source-highlighter: pygments
+:toc:
+:toclevels: 7
+:sectnums:
+:sectnumlevels: 6
+:numbered:
+:chapter-label: ch01_08_manage_host_groups-ge
+:icons: font
+ifndef::env-github[:icons: font]
+ifdef::env-github[]
+:status:
+:outfilesuffix: .adoc
+:caution-caption: :fire:
+:important-caption: :exclamation:
+:note-caption: :paperclip:
+:tip-caption: :bulb:
+:warning-caption: :warning:
+endif::[]
+:imagesdir: ./images/
+
+
+[id='ch01_08_manage_host_groups-ge']
+= Guided Exercise: Manage SUDO rules in IdM
+
+== Outcomes
+You should be able to:
+
+* Create, delete and SUDO rules
+* Associate SUDO rules with host or hostgroups
+
+=== Prerequisites
+
+You have successfully completed the previous Guided Exercises.
+
+TIP: Opening two tabs in the Gnome Terminal can help you to easily switch between the `idm-inventory` and `idm-code` directories.
+
+
+[role='Checklist']
+== Instructions
+
+1) Login to your workstation as **student** user and open a new terminal. Ensure that you use the `ansible2.9` Python virtual environment.
+[subs=+quotes]
+----
+[student@workstation ~]$ *source ~/venvs/ansible2.9/bin/activate*
+(ansible2.9)[student@workstation ~]$
+
+----
+
+2) Navigate to the `workshop/idm-code` directory.
+[subs=+quotes]
+----
+(ansible2.9)[student@workstation ~]$ *cd ~/workshop/idm-code*
+
+----
+
+3) Examing the role `rhidm_manage_sudo`
+
+3.1) Examine the default values of the role's variables. Note the name and the structure of the variables used by the role.
+
+[subs=+quotes]
+----
+(ansible2.9)[student@workstation ~]$ *cat ~/workshop/idm-code/roles/rhidm_manage_sudo/defaults/main.yml*
+
+----
+
+3.2 Examine the task file to identify the mandatory variables
+[subs=+quotes]
+----
+(ansible2.9)[student@workstation ~]$ *cat ~/workshop/idm-code/roles/rhidm_manage_sudo/tasks/main.yml*
+
+----
+
+5) Create a list of dictionaries that will represent the SUDO rules as defined in the following tables:
+
+[cols="3", options="header"]
+|===
+| SUDO Group Name | Description | Commands
+| Systemctl NetworkManager | All systemctl related commands for NetworkManager a|
+* /usr/bin/systemctl start NetworkManager
+* /usr/bin/systemctl status NetworkManager
+* /usr/bin/systemctl status -l NetworkManager
+* /usr/bin/systemctl stop NetworkManager
+* /usr/bin/systemctl restart NetworkManager
+* /usr/bin/systemctl reload NetworkManager
+|===
+
+[cols="4", options="header"]
+|===
+| SUDO Rule Name | Description | User Groups | Host Groups
+| sr_sudo_nm  | Allow sudo to NetworkManager | wsgroup01 | wsclients
+|===
+
+Users should not be asked for their password.
+
+5.1 Create a new file in the IdM inventory that will store the sudo information.
+[subs=+quotes]
+----
+(ansible2.9)[student@workstation ~]$ *vim ~/workshop/idm-inventory/group_vars/rhidms/rhidm_sudo_data.yml*
+----
+
+[source,yaml]
+----
+---
+rhidm_sudo_cmd_groups:
+  - sudo_cmdg_name: Systemctl NetworkManager
+    description: "All systemctl related commands for NetworkManager"
+    cmds:
+      - sudocmd: /usr/bin/systemctl start NetworkManager
+        description: Start NetworkManager
+      - sudocmd: /usr/bin/systemctl status NetworkManager
+        description: Status of NetworkManager
+      - sudocmd: /usr/bin/systemctl status -l NetworkManager
+        description: NetworkManager Long lines Status
+      - sudocmd: /usr/bin/systemctl stop NetworkManager
+        description: Stop NetworkManager
+      - sudocmd: /usr/bin/systemctl restart NetworkManager
+        description: Restart NetworkManager
+      - sudocmd: /usr/bin/systemctl reload NetworkManager
+        description: Reload NetworkManager
+
+rhidm_sudo_rules:
+  - name: "sr_sudo_nm"
+    description: "Allow sudo to NetworkManager"
+    state: present
+    usergroup:
+      - wsgroup01
+    hostgroup:
+      - wsclients
+    cmdgroup:
+      - "Systemctl NetworkManager"
+    sudoopt:
+      - '!authenticate'
+...
+----
+
+7) Include the role `rhidm_manage_sudo` in your playbook and execute it
+
+7.1) Modify the playbook `+type__rhidm__configure.yml+` to include the role `rhidm_manage_users`
+
+[subs="verbatim,macros"]
+----
+pass:q[[student@workstation ~\]$ *vim  /home/student/workshop/idm-code/type*]__pass:q[*rhidm*]__pass:q[*configure.yml*]
+---
+- name: Configure the RH IDM domain
+  hosts: "{{ __config_host | groups['rhidms_master'][0] | default('localhost') }}"
+  roles:
+    - role: rhidm_configure
+      tags: idm_conf
+
+    - role: rhidm_manage_users
+      tags: idm_users
+
+    - role: rhidm_manage_groups
+      tags: idm_groups
+
+    - role: rhidm_manage_hosts
+      tags: idm_hosts
+
+    - role: rhidm_manage_hbac
+      tags: idm_hbac
+
+    - role: rhidm_manage_sudo
+      tags: idm_sudo
+...
+----
+
+7.2) Execute the playbook to manage hosts
+
+[subs="verbatim,macros"]
+----
+pass:q[(ansible2.9)[student@workstation ~\]$ *cd ~/workshop/idm-code/*]
+pass:q[(ansible2.9)[student@workstation ~\]$ *ansible-playbook --ask-vault-pass \
+ -i ../idm-inventory ./type*]__pass:q[*rhidm*]__pass:q[*configure.yml*]
+
+...output ommitted...
+
+TASK [rhidm_manage_sudo : Manage SUDO Commands] **********************************************************************************
+pass:q[*changed*]: [idm.lab.example.net] => (item=/usr/bin/systemctl start NetworkManager)
+pass:q[*changed*]: [idm.lab.example.net] => (item=/usr/bin/systemctl status NetworkManager)
+pass:q[*changed*]: [idm.lab.example.net] => (item=/usr/bin/systemctl status -l NetworkManager)
+pass:q[*changed*]: [idm.lab.example.net] => (item=/usr/bin/systemctl stop NetworkManager)
+pass:q[*changed*]: [idm.lab.example.net] => (item=/usr/bin/systemctl restart NetworkManager)
+pass:q[*changed*]: [idm.lab.example.net] => (item=/usr/bin/systemctl reload NetworkManager)
+
+TASK [rhidm_manage_sudo : Manage SUDO Command Groups] ****************************************************************************
+pass:q[*changed*]: [idm.lab.example.net] => (item=Systemctl NetworkManager)
+
+TASK [rhidm_manage_sudo : Manage sudo RULES] *************************************************************************************
+pass:q[*changed*]: [idm.lab.example.net] => (item=sr_sudo_nm)
+
+PLAY RECAP ***********************************************************************************************************************
+idm.lab.example.net        : ok=20   pass:q[*changed*]:=3    unreachable=0    failed=0    skipped=3    rescued=0    ignored=0
+
+----
+
+8) Login to idm client with the user `wshop01` and execute the commands:
+[subs=+quotes]
+----
+[student@workstation ~]$ *ssh wshop01@client*
+Last login: Sun Mar  5 23:38:06 2023 from 172.25.250.254
+-sh-4.2$ *sudo -l*
+Matching Defaults entries for wshop01@lab.example.net on client:
+    !visiblepw, always_set_home, match_group_by_gid, env_reset, env_keep="COLORS DISPLAY HOSTNAME HISTSIZE KDEDIR LS_COLORS", env_keep+="MAIL
+    PS1 PS2 QTDIR USERNAME LANG LC_ADDRESS LC_CTYPE", env_keep+="LC_COLLATE LC_IDENTIFICATION LC_MEASUREMENT LC_MESSAGES",
+    env_keep+="LC_MONETARY LC_NAME LC_NUMERIC LC_PAPER LC_TELEPHONE", env_keep+="LC_TIME LC_ALL LANGUAGE LINGUAS _XKB_CHARSET XAUTHORITY",
+    secure_path=/sbin\:/bin\:/usr/sbin\:/usr/bin\:/usr/local/sbin\:/usr/local/bin
+
+User wshop01@lab.example.net may run the following commands on client:
+    (ALL : ALL) NOPASSWD: /usr/bin/systemctl stop NetworkManager, /usr/bin/systemctl start NetworkManager, /usr/bin/systemctl status
+        NetworkManager, /usr/bin/systemctl status -l NetworkManager, /usr/bin/systemctl restart NetworkManager, /usr/bin/systemctl reload
+        NetworkManager
+
+-sh-4.2$ *logout*
+(ansible2.9)[student@workstation ~]$
+----
+
+This concludes the section.

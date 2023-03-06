@@ -1,0 +1,299 @@
+:pygments-style: tango
+:source-highlighter: pygments
+:toc:
+:toclevels: 7
+:sectnums:
+:sectnumlevels: 6
+:numbered:
+:chapter-label: ch01_05_manage_users_groups
+:icons: font
+ifndef::env-github[:icons: font]
+ifdef::env-github[]
+:status:
+:outfilesuffix: .adoc
+:caution-caption: :fire:
+:important-caption: :exclamation:
+:note-caption: :paperclip:
+:tip-caption: :bulb:
+:warning-caption: :warning:
+endif::[]
+:imagesdir: ./images/
+
+[id='ch01_05_manage_users_groups']
+= Manage IdM Host Groups and Host Automember with Ansible
+
+== Objectives
+
+After completing this section, you should be able to:
+
+* Understand the different strategies regarding the management of IdM users and groups with Ansible
+* Understand how to write your inventory files for this
+
+=== Managing uses and groups (Overview)
+The `freeipa.ansible_freeipa` collection provides a comprehensive range of modules regarding the management of users and user groups. +
+What distinguishes these modules is their adherence to the same logical structure that underpins the command-line interface of IdM. Specifically, modules dealing with users are dedicated to user-related data exclusively, while modules relating to groups deal with the administration of user groups, including user membership.
+
+This division is a crucial consideration when working with them, particularly when overseeing user group memberships. It is essential to first create individual user accounts, followed by the corresponding user groups, before finally managing user memberships via the appropriate modules.
+
+=== Managing Users
+
+Following the approach we discussed previously, the documentation page of the `ipauser` module (https://github.com/freeipa/ansible-freeipa/blob/master/README-user.md), provides us with all the available options of it.
+
+Although this page offers numerous examples, we can appreciate how the module's usage of a dictionary structure for user attributes makes it very flexible. Furthermore, the module offers various alternative strategies for managing users.
+
+.Use standard Ansible loops
+This strategy requires is the simpler one. We define the user attributes in a variable with a similar structure as the one in the module. The state of each user defines what the module will do for each one of them. An example structure for a task based on this strategy is this:
+
+[source,yaml]
+----
+- name: Manage IdM users
+  freeipa.ansible_freeipa.ipauser:
+    ipaadmin_principal: "{{ rhidm_admin_principal }}"
+    ipaadmin_password: "{{ rhidm_admin_password }}"
+    name: "{{ item.first[0] }}{{ item.surname }}"
+    first: "{{ item.first }}"
+    last: "{{ item.surname }}"
+    fullname: "{{ item.fullname | default(omit) }}"
+    displayname: "{{ item.displayname | default(omit) }}"
+    shell: "{{ item.shell | default(omit) }}"
+    email: "{{ item.mail | default(omit) }}"
+    passwordexpiration: "{{ item.krbpasswordexpiration | default(omit) }}"
+    password: "{{ item.password | default(omit) }}"
+    random: "{{ true of item.random | bool == true and item.password | default('') | length == 0 else false }}"
+    uid: "{{ item.uid | default(omit) }}"
+    gid: "{{ item.gid | default(omit) }}"
+    initials: "{{ item.initials | default(omit) }}"
+    city: "{{ item.city | default(omit) }}"
+    update_password: "on_create"
+    userstate: "{{ item.state }}"
+    postalcode: "{{ item.zip | default(omit) }}"
+    phone: "{{ item.phone | default(omit) }}"
+    mobile: "{{ item.mobile | default(omit) }}"
+    title: "{{ item.title | default(omit) }}"
+    manager: "{{ item.manager | default(omit) }}"
+    userauthtype: "{{ item.userauthtype | default(omit) }}"
+    userclass: "{{ item.userclass | default(omit) }}"
+    certificate: "{{ item.userclass | default(omit) }}"
+    sshpubkey: "{{ item.sshpubkey | default(omit) }}"
+    noprivate: "{{ item.sshpubkey | default(false) }}"
+  loop: "{{ rhidm_users }}"
+  loop_control:
+    label: "{{ item.first }} {{ item.last }} - "{{ item.state | default('present') }}""
+----
+
+The structure of the module, dictates the structure of the variables. It's clear that we will need either a list of dictionaries or a dictionary of dictionaries. There are arguments supporting either case and is merely a decision of the devops engineers which can be taken only when they take into account the architecure of the IdM deployment as a whole.
+
+For the purposes of this course, we will create a list of dictionaries.
+
+[source,yaml]
+----
+rhidm_users:
+  - first: 'John'
+    last: 'Doe'
+    password: 'Passw0rd!'
+    state: present
+  - first: "Peter"
+    last: "Smith"
+    password: !unsafe 'Secret123!'
+  - first: "Marie"
+    last: "Johnson"
+    password: !unsafe 'TopSecret!'
+    state: absent
+----
+
+An important drawback of this methodology is that Ansible will iterate over each user in the list, and for each one of them, it will make an API call to the IdM server. This could result in significant delays, especially when configuring multiple users. As a result, it is critical to consider this aspect when designing our solution and implement appropriate measures to mitigate any performance issues.
+
+.Distinguish the user actions per task
+
+An alternative approach to manage users with our Ansible role is to separate the actions into different tasks. We can use the ipauser module's six different states (`present`, `absent`, `enabled`, `disabled`, `unlocked`, and undeleted) to generate lists of dictionaries with users belonging to each category dynamically. This approach can be more complex during development and testing, but once the variables are set up correctly, it can significantly reduce the execution time of the playbook.
+
+An example task could be like the following:
+
+[source,yaml]
+----
+- name: Generate the list of users that we will create
+  ansible.builtin.set_fact:
+    __dynamic_list_for_create_users: "{{ rhidm_users | ansible.builtin.selectattr('state', 'undefined')
+    | union(rhidm_users | ansible.builtin.selectattr('state', "equalto", 'present') | list }}"
+
+- name: Generate the list of users that we will disable
+  ansible.builtin.set_fact:
+    __dynamic_list_for_disabled_users: "{{ rhidm_users | ansible.builtin.selectattr('state', 'defined')
+    | union(rhidm_users | ansible.builtin.selectattr('state', "equalto", 'disabled') | list }}"
+
+- name: Create IdM users
+  freeipa.ansible_freeipa.ipauser:
+    ipaadmin_principal: "{{ rhidm_admin_principal }}"
+    ipaadmin_password: "{{ rhidm_admin_password }}"
+    users: "{{ __dynamic_list_for_create_users }}"
+    state: present
+    update_password: on_create
+
+- name: Disable IdM users
+  freeipa.ansible_freeipa.ipauser:
+    ipaadmin_principal: "{{ rhidm_admin_principal }}"
+    ipaadmin_password: "{{ rhidm_admin_password }}"
+    users: "{{ __dynamic_list_for_disabled_users }}"
+    state: disabled
+----
+
+=== Managing Groups
+
+Managing groups in IDM using the `freeipa.ansible_freeipa` module is more involved than managing users. The group module enables us to ensure the presence and absence of groups and their members. The module's documentation is available at https://github.com/freeipa/ansible-freeipa/blob/master/README-group.md.
+
+The module has a dual functionality. The first is to manage groups by creating or deleting them, while the second is to manage group memberships. As mentioned before, we must first create the user and user groups and then manage the group memberships.
+
+In addition to standard POSIX groups, the module also allows us to create non-POSIX and external groups. These groups are particularly useful when establishing a trust relationship with Active Directory.
+
+.Building the group-related variables
+
+When managing group membership with freeipa.ansible_freeipa, one of the decisions that a DevOps engineer needs to make is how to represent a user's group membership in the inventory variables. There are two options available to choose from.
+
+The first option is to include the group membership variables as part of the user's data. This approach is very efficient when it comes to administering the relevant variables. However, the disadvantage of this approach is that it generates a relatively flat structure, which might not be suitable for more complex setups.
+
+An example of a data structure for this approach is show in the following example.
+
+[source,yaml]
+----
+rhidm_users:
+  - first: 'John'
+    last: 'Doe'
+    password: 'Passw0rd!'
+    state: present
+    groups:
+      - group01
+      - group02
+      - group03
+  - first: "Peter"
+    last: "Smith"
+    password: !unsafe 'Secret123!'
+    groups:
+      - group01
+  - first: "Marie"
+    last: "Johnson"
+    password: !unsafe 'TopSecret!'
+    state: absent
+----
+
+A second approach is to define the group membership by including users as members of the group in the group definition. This approach can result in more complex structures, as groups can be included as members of other groups etc. However, this approach can lead to potential data inconsistencies as user data is managed separately from the group membership data.
+
+An example of a data structure for this approach is show in the following example.
+
+[source,yaml]
+----
+rhidm_user_groups:
+  - name: idmgroup01
+    gid: 50000
+    description: >
+      IdM group used by Ansible-created users
+    users:
+      - jdoe
+      - psmith
+    subgroups:
+      - subgroup01
+      - subgroup02
+    external: true
+     externalmember:
+       - 'EXAMPLE.NET\aduser01'
+       - 'EXAMPLE.NET\aduser02'
+----
+
+The decision on the data structures and on which conceptual object, users or groups, we define the group membership determines the way we write the corresponding tasks. Therefore, it is important to carefully consider the pros and cons of each approach before making a decision. For simplicity reasons during this workshop, we will define the group membership of users as part of the group's definition.
+
+To define a group as a member of another group, it's necessary to create the child group **before** the parent group. While the use of nested user groups is possible, it's important to keep this ordering in mind to avoid errors. The behavior of ensuring child groups are created before parent groups is consistent with the behavior of the ipa command line tool.
+
+.Writing the Group management task
+The group management task is straightforward and easy to implement. The documentation page provides the skeleton for our task.
+
+[source,yaml]
+----
+- name: Manage the IdM User groups
+  freeipa.ansible_freeipa.ipagroup:
+    ipaadmin_principal: "{{ rhidm_admin_principal }}"
+    ipaadmin_password: "{{ rhidm_admin_password }}"
+    name: "{{ item.name }}"
+    description: "{{ item.description }}"
+    gid: "{{ item.gid | default(omit) }}"
+    posix: "{{ item.external | default(true) }}"
+    external: "{{ item.external | default(omit) }}"
+    nonposix: "{{ item.external | default(omit) }}"
+    externalmember: "{{ item.externalmember | default(omit) }}"
+    state: "{{ item.state | default('present') }}"
+  loop: "{{ rhidm_user_groups }}"
+  loop_control:
+    label: "{{ item.name }} - {{ item.state | default('present') }}"
+
+----
+
+This Ansible task can perform the creation or deletion of a group, as evident from the provided YAML structure. However, an exception exists for managing the group membership of "external" groups, such as those consisting of Active Directory users. In this case, the task can also handle the management of group membership by providing a list of external users.
+
+.Writing the Group membership task
+The group membership task is even more straightforward and easy to implement. Again the documentation page provides the skeleton for our task.
+
+[source,yaml]
+----
+- name: Manage the IdM User groups membership
+  freeipa.ansible_freeipa.ipagroup:
+    ipaadmin_principal: "{{ rhidm_admin_principal }}"
+    ipaadmin_password: "{{ rhidm_admin_password }}"
+    name: "{{ item.name }}"
+    action: member
+    user: "{{ item.user | default([]) }}"
+    group: "{{ item.group | default([]) }}"
+  loop: "{{ rhidm_user_groups }}"
+  loop_control:
+    label: "{{ item.name }} - {{ item.state | default('present') }}"
+----
+
+The task requires the `rhidm_user_groups` variable to have the appropriate structure to support group membership. If we define the group membership in the user's definition, we need to dynamically construct a new variable to hold the group membership information.
+
+One very important consideration is the way that existing group members are handled from this module. Assuming that we have a group with the name `demogroup` and we have already defined users `user01`, `user02`, `user03` as its members. +
+Modifying our inventory variable so as `user03` is no longer a member of `group01` will **not** result to the removal of the user from it. The task will ensure that users `user01` and `user02` are members of the group and since they already are, it will not perform any additional action!
+
+[TIP]
+====
+In general, the behavior of the `freeipa.ansible_freeipa` modules differs from the older community-supported IPA modules, where inventory values were considered as the desired state of the IdM object, and corrective actions were taken in case of deviations. +
+With the `freeipa.ansible_freeipa module`, inventory values are still considered as the desired state of the IdM object; however, any existing items or attributes defined outside of them are not modified.
+====
+
+[id='user-group-auto-member']
+.Managing the Auto-member rules
+The `freeipa.ansible_freeipa` modules handles the management of automember rules for both user groups and host groups in a similar way. As a DevOps engineer, there are two options for creating the necessary data structures in the inventory.
+
+The first option is to create a dedicated data structure for all the automember rules, both for user and host groups. Since hosts are not directly managed from the inventory, a separate data structure is needed. Including group automember rules in this structure is logical.
+
+The second option is to store the automember information within the relevant user and host group data structures. While this approach may make the data structures more complex, it ensures there are no inconsistencies between the groups and the automember rules.
+
+Reading the documentation page for the automember module in https://github.com/freeipa/ansible-freeipa/blob/master/README-automember.md we note all the important variables we need to define.
+
+Prioritizing data consistency, we can choose to update the data structure for the groups as follows:
+
+[source,yaml]
+----
+rhidm_user_groups:
+  - name: idmgroup01
+    gid: 50000
+    description: >
+      IdM group used by Ansible-created users
+    users:
+      - jdoe
+      - psmith
+    subgroups:
+      - subgroup01
+      - subgroup02
+
+    automember_state: present
+    automember_description: A description for the AM rule
+    automember_incrules:
+      - key: cn
+        expr: 'inexp2'
+        state: absent
+    automember_excrules:
+      - key: cn
+        expr: 'exexp2'
+        state: present
+----
+
+NOTE: The data structure above can use a dictionary to represent the `automember` related information. However this requires more processing prior to the execution.
+
+This concludes the section.

@@ -1,0 +1,409 @@
+:pygments-style: tango
+:source-highlighter: pygments
+:toc:
+:toclevels: 7
+:sectnums:
+:sectnumlevels: 6
+:numbered:
+:chapter-label: ch01_04_rhidm-prepare-for-ansible-ge
+:icons: font
+ifndef::env-github[:icons: font]
+ifdef::env-github[]
+:status:
+:outfilesuffix: .adoc
+:caution-caption: :fire:
+:important-caption: :exclamation:
+:note-caption: :paperclip:
+:tip-caption: :bulb:
+:warning-caption: :warning:
+endif::[]
+:imagesdir: ./images/
+
+[id='ch01_04_rhidm-prepare-for-ansible-ge']
+= Guided Exercise:  Use the freeipa.ansible_freeipa Ansible Collection and configure IdM
+
+== Outcomes
+
+You should be able to
+
+* Clone the repository that contain the Automation Code
+* Install the *freeipa.ansible_freeipa* collection
+* Configure global IdM configuration as:
+  ** New users login shell will be the /bin/bash
+  ** `/bin/bash` is the default shell for the new users.
+  ** The default e-mail domain is `example.net`
+  ** The default domain resolution order to `lab.example.net`, `example.net`
+* Configure the Global password policy so as new passwords will confront to the following requirements:
+  ** Be at least **7** characters long
+  ** Contain at least **3** character classes
+  ** **Cannot** be changed in less than **24** hours
+  ** **Must** change every **90** days
+  ** Must not match the **last 10** password
+* In addition, ensure that users can enter up to **3** times a wrong password. Failing to provide a valid password will lock the account for **3 minutes**, and they have to wait for **5 minutes** until the failure counter is reset.
+
+=== Prerequisites
+
+You have successfully completed the Guided Exercise "__Prepare your Ansible controller node__"
+
+TIP: Opening two tabs in the Gnome Terminal can help you to easily switch between the `idm-inventory` and `idm-code` directories.
+
+[role='Checklist']
+== Instructions
+
+1) Login to your workstation as **student** user and open a new terminal. Ensure that you use the `ansible2.9` Python virtual environment.
+[subs=+quotes]
+----
+[student@workstation ~]$ *source ~/venvs/ansible2.9/bin/activate*
+(ansible2.9)[student@workstation ~]$
+
+----
+
+2) Navigate to the `workshop/idm-code` directory.
+[subs=+quotes]
+----
+(ansible2.9)[student@workstation ~]$ *cd ~/workshop/idm-code*
+
+----
+
+3) **Clone** the workshop's repository from Github and create a new branch to work on it.
+
+[subs="+quotes"]
+----
+(ansible2.9)[student@workstation venvs]$ *cd ~/workshop/idm-code*
+(ansible2.9)[student@workstation ~]$ *git clone https://github.com/p-tselios/idm-wshop.git ./*
+(ansible2.9)[student@workstation ~]$ *git checkout -b <yourname>_workshop*
+----
+
+NOTE: Replace the <yourname> with your ROL username without spaces or dots.
+
+4) **Update** the Ansible configuration file so as:
+
+* The collections path includes the `./collections` directory
+* The remote user is set to `root`
+
+[subs=+quotes]
+----
+(ansible2.9)[student@workstation idm-code]$ *vim ./ansible.cfg*
+[defaults]
+inventory = inventory
+remote_user = *root*
+collections_paths = *./collections:*/usr/share/ansible/collections
+
+...output ommitted...
+
+----
+
+5) Ensure that the directory `collection` exists.
+[subs=+quotes]
+----
+(ansible2.9)[student@workstation idm-code]$ *mkdir ./collections*
+
+----
+
+6) **Install** the `freeipa.ansible_freeipa` using the `ansible-galaxy` command
+[subs=+quotes]
+----
+(ansible2.9)[student@workstation ~]$ *cd ~/workshop/idm-code*
+(ansible2.9)[student@workstation venvs]$ *ansible-galaxy collection install \
+  freeipa.ansible_freeipa -p ./collections*
+[WARNING]: The specified collections path '/home/student/workshop/idm-code/collections' is not part of the configured
+Ansible collections paths '/home/student/.ansible/collections:/usr/share/ansible/collections'. The installed
+collection won't be picked up in an Ansible run. <1>
+
+Process install dependency map
+Starting collection install process
+Installing 'freeipa.ansible_freeipa:1.9.2' to '/home/student/workshop/idm-code/collections/ansible_collections/freeipa/ansible_freeipa'
+----
+
+<1> You can safely ignore this warning, we will update our Ansible configuration when we clone the repository.
+
+[WARNING]
+====
+It is possible to see the following error:
+
+__ERROR! Unexpected Exception, this is probably a bug: <urlopen error [Errno -2] Name or service not known>__
+
+This is known issue in our lab and it's related to its custom nature. If you receive this error message, please wait 1-2 before you re-try the command.
+====
+
+7) Verify that the *ansible.cfg* configuration for the remote user and the privileges escallation is correct. To do so, use the `setup` module with the `ansible` command.
+
+[subs=+quotes]
+----
+(ansible2.9)[student@workstation idm-code]$ *ansible -i ../idm-inventory/ -m setup -b all*
+replica1.lab.example.net | SUCCESS => {
+    "ansible_facts": {
+        "ansible_all_ipv4_addresses": [
+            "172.25.250.9"
+        ],
+
+...output ommitted...
+
+        "ansible_user_shell": "/bin/bash",
+        "ansible_user_uid": 0,
+        "ansible_userspace_architecture": "x86_64",
+        "ansible_userspace_bits": "64",
+        "ansible_virtualization_role": "guest",
+        "ansible_virtualization_type": "openstack",
+        "discovered_interpreter_python": "/usr/bin/python",
+        "gather_subset": [
+            "all"
+        ],
+        "module_setup": true
+    },
+    "changed": false
+}
+
+----
+
+8) Create a **vault** file to store the passwords
+[subs=+quotes]
+----
+(ansible2.9)[student@workstation idm-code]$ *cd ../idm-inventory*
+(ansible2.9)[student@workstation idm-inventory]$ *ansible-vault create ./group_vars/rhidms/rhidm_secrets.yml*
+New Vault password: *redhat*
+Confirm New Vault password: *redhat*
+----
+[source,yaml]
+----
+---
+rhidm_admin_password: !unsafe 'RedHat123^'
+rhidm_ldap_user_password: !unsafe 'password123!'
+...
+
+----
+
+9) Store the variables that are common to all hosts in the inventory under the `group_vars/all` directory in a file with representative name. The variables store information about:
+
+* The domain (**lab.example.net**)
+[subs=+quotes]
+----
+(ansible2.9)[student@workstation idm-inventory]$ *mkdir ./group_vars/all*
+(ansible2.9)[student@workstation rhidms]$ *vim ./group_vars/all/rhidm_common_vars.yml*
+----
+[source,yaml]
+----
+---
+rhidm_domain_name: "lab.example.net"
+...
+----
+
+11) Define the required variables
+
+11.1) Create the IdM **global configuration** variables file that will configure IdM so as:
+
+* `/bin/bash` is the default shell for the new users.
+* The default e-mail domain is `example.net`
+* The default domain resolution order to `lab.example.net`, `example.net`
+* The Global password policy defines:
+  ** At least **7** characters long password
+  ** At least **3** character classes are used
+  ** **Cannot** be changed in less than **24** hours
+  ** **Must** change every **90** days
+  ** Must not match the **last 10** password
+* Users can enter up to **3** times a wrong password. Failing to provide a valid password will lock the account for **3 minutes**, and they have to wait for **5 minutes** until the failure counter is reset.
+
+Variables should have a prefix and they should be stored in a file with descriptive name.
+
+[subs=+quotes]
+----
+(ansible2.9)[student@workstation idm-inventory]$ *cd ~/workshop/idm-inventory/group_vars/rhidms*
+(ansible2.9)[student@workstation rhidms]$ *vim ./rhidms_global_configuration.yml*
+----
+[source,yaml]
+----
+---
+
+# Default shell for new users
+rhidm_defaultshell: "/bin/bash"
+
+# Default email domain for the new users
+rhidm_emaildomain: "example.net"
+
+# Set list of domains used for short name qualification
+rhidm_domain_resolution_order:
+  - lab.example.net
+  - example.net
+
+rhidm_default_pw_policy: <1>
+  minlength: 8
+  minclasses: 3
+  minlife: 24
+  maxlife: 90
+  history: 10
+  lockouttime: 180
+  maxfail: 3
+  failinterval: 120
+...
+
+----
+
+<1> The default password policy is defined as a dictionary, since this structure allows us to store information about objects. The password policy is a object with specific options
+
+11.1) **Validate** the variables (Optional)
+[subs=+quotes]
+----
+(ansible2.9)[student@workstation rhidms]$ *cd ~/workshop/idm-code*
+(ansible2.9)[student@workstation idm-code]$ *ansible -i ../idm-inventory -m debug \
+  -a var=rhidm_defaultshell all --ask-vault-pass*
+Vault password: *redhat*
+idm.lab.example.net | SUCCESS => {
+    "rhidm_defaultshell": "/bin/bash"
+}
+replica2.lab.example.net | SUCCESS => {
+    "rhidm_defaultshell": "/bin/bash"
+}
+replica1.lab.example.net | SUCCESS => {
+    "rhidm_defaultshell": "/bin/bash"
+}
+
+----
+
+12) Explore the Ansible playbook and roles.
+
+12.1) Navigate to the `idm-code` directory and examine the **+type__rhidm__configure.yml+** playbook. Verify that it's executed on the `idm.lab.example.net` server.
+
+[subs=+quotes]
+----
+(ansible2.9)[student@workstation idm-inventory]$ *cat ./type__rhidm__configure.yml*
+
+---
+- name: Configure the RH IDM domain
+  hosts: "{{ __config_host | default(groups['rhidms_master'][0]) | default('localhost') }}"
+  roles:
+    - rhidm_configure
+
+...
+
+----
+
+12.2) Navigate to `roles/rhidm_configure` directory. View its contents.
+
+[subs=+quotes]
+----
+(ansible2.9)[student@workstation rhidm_configure]$ *ls -l*
+total 16
+drwxrwxr-x. 2 student student   22 Mar  4 00:49 defaults
+drwxrwxr-x. 2 student student   22 Mar  3 23:55 meta
+-rwxrwxr-x. 1 student student 6188 Mar  3 23:55 README.md
+drwxrwxr-x. 2 student student 4096 Mar  4 00:52 tasks
+drwxrwxr-x. 2 student student 4096 Mar  4 01:02 templates
+
+----
+
+12.3) Examing the tasks of the role.
+[subs=+quotes]
+----
+(ansible2.9)[student@workstation rhidm_configure]$ *cat ./tasks/main.yml*
+---
+- name: Verify that required parameters are set <1>
+  ansible.builtin.assert:
+    that:
+      - rhidm_admin_principal is defined
+      - rhidm_admin_password is defined
+      - rhidm_ds_password is defined
+      - rhidm_domain_name is defined
+      - rhidm_ldap_read_user is defined
+      - rhidm_ldap_user_password is defined
+
+- name: Configure default parameters for users <2>
+  freeipa.ansible_freeipa.ipaconfig:
+    ipaadmin_principal: "{{ rhidm_admin_principal }}"
+    ipaadmin_password: "{{ rhidm_admin_password }}"
+    defaultshell: "{{ rhidm_defaultshell | default(omit) }}"
+    defaultgroup: "{{ rhidm_defaultgroup | default(omit) }}"
+    emaildomain: "{{ rhidm_emaildomain | default(omit) }}"
+    searchtimelimit: "{{ rhidm_searchtimelimit | default(omit) }}"
+    searchrecordslimit: "{{ rhidm_searchrecordslimit | default(omit) }}"
+    groupsearch: "{{ rhidm_groupsearch | default(omit) }}"
+    domain_resolution_order: "{{ rhidm_domain_resolution_order | default(omit) }}"
+  tags:
+    - rhidm_config
+    - rhidm_config_defaults
+
+- name: Create the default password policy <3>
+  become: true
+  freeipa.ansible_freeipa.ipapwpolicy:
+    ipaadmin_principal: "{{ rhidm_admin_principal }}"
+    ipaadmin_password: "{{ rhidm_admin_password }}"
+    minlength: "{{ rhidm_default_pw_policy.minlength | default(omit) }}"
+    minclasses: "{{ rhidm_default_pw_policy.minclasses | default(omit) }}"
+    minlife: "{{ rhidm_default_pw_policy.minlife | default(omit) }}"
+    maxlife: "{{ rhidm_default_pw_policy.maxlife | default(omit) }}"
+    history: "{{ rhidm_default_pw_policy.history | default(omit) }}"
+    priority: "{{ rhidm_default_pw_policy.priority | default(omit) }}"
+    lockouttime: "{{ rhidm_default_pw_policy.lockouttime | default(omit) }}"
+    maxfail: "{{ rhidm_default_pw_policy.maxfail | default(omit) }}"
+    failinterval: "{{ rhidm_default_pw_policy.failinterval | default(omit) }}"
+    state: "{{ rhidm_default_pw_policy.state | default(omit) }}"
+  tags:
+    - rhidm_config
+    - rhidm_config_defaults
+    - rhidm_config_defaults_pw_policy
+
+- name: Create LDAP bind user for Applications
+  become: true
+  community.general.ldap_entry:
+    bind_dn: "cn=Directory Manager"
+    bind_pw: "{{ rhidm_ds_password }}"
+    start_tls: true
+    server_uri: "ldap://localhost/"
+    dn: "uid={{ rhidm_ldap_read_user }},cn=sysaccounts,cn=etc,{{'dc=' + rhidm_domain_name | regex_replace('\\.', ',dc=') }}"
+    objectClass:
+      - account
+      - simplesecurityobject
+    attributes:
+      uid: "system"
+      description: "An LDAP user to allow external applications to authenticate users"
+      passwordExpirationTime: "21000101000000Z"
+      userPassword: "{{ rhidm_ldap_user_password }}"
+    state: present
+    validate_certs: "{{ rhidm_validate_certs | default(true) }}"
+  no_log: false
+  tags:
+    - rhidm_config
+    - rhidm_config_defaults
+    - rhidm_config_defaults_ldap_user
+...
+
+----
+
+<1> Every role requires some variables. Typically we define them in the `defaults/main.yml`. However, in IdM we want to ensure that we use the appropriate domain, the correct passwords etc. Thus we define them in the inventory. This task ensures that the absolute minimum variables are defined.
+<2> This task ensures that new users defaults are specified according to our requirements.
+<3> This task defines the default password policy
+
+
+13) Execute the IdM configuration playbook
+
+13.1) Execute the IdM configuration playbook once to apply the desired configuration state
+
+[subs="verbatim,macros"]
+----
+pass:q[[student@workstation ~\]$ *cd  /home/student/workshop/idm-code*]
+pass:q[[student@workstation ~\]$ *cat ./type*]__pass:q[*rhidm*]__pass:q[*configure.yml*]
+
+pass:q[(ansible2.9)[student@workstation idm-code\]$ *ansible-playbook --ask-vault-pass \
+ -i ../idm-inventory ./type*]__pass:q[*rhidm*]__pass:q[*configure.yml*]
+
+...output ommitted...
+
+PLAY RECAP ***********************************************************************************************************************
+idm.lab.example.net        : ok=8    changed=2    unreachable=0    failed=0    skipped=2    rescued=0    ignored=0
+
+----
+
+13.2) Check the idempotency of the playbook and roles by executing the playbook again. Verify that the number of tasks reported as **changed** is **0**
+[subs="verbatim,macros"]
+----
+pass:q[(ansible2.9)[student@workstation idm-code\]$ *ansible-playbook --ask-vault-pass \
+ -i ../idm-inventory ./type*]__pass:q[*rhidm*]__pass:q[*configure.yml*]
+
+...output ommitted...
+
+PLAY RECAP ***********************************************************************************************************************
+idm.lab.example.net        : ok=8    changed=0    unreachable=0    failed=0    skipped=2    rescued=0    ignored=0
+
+----
+
+
+This concludes the section.

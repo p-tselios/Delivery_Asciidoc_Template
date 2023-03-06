@@ -19,7 +19,30 @@ ifdef::env-github[]
 endif::[]
 :imagesdir: ./images/
 
-==  <CHAPTER TITLE>
+==  Manage IdM with Ansible
 
 :sectnums:
-include::Chapters/CH1/Section1.adoc[]
+include::Chapters/CH1/ch01_01_idm_configuration_with_ansible.adoc[]
+:sectnums:
+include::Chapters/CH1/ch01_02_prepare_ansible_node_ge.adoc[]
+
+:sectnums:
+include::Chapters/CH1/ch01_03_prepare_for_ansible_code.adoc[]
+
+:sectnums:
+include::Chapters/CH1/ch01_04_prepare_for_ansible_code_ge.adoc[]
+
+:sectnums:
+include::Chapters/CH1/ch01_05_manage_users_groups.adoc[]
+
+:sectnums:
+include::Chapters/CH1/ch01_06_manage_users_groups_ge.adoc[]
+
+:sectnums:
+include::Chapters/CH1/ch01_07_manage_host_groups.adoc[]
+
+:sectnums:
+include::Chapters/CH1/ch01_08_manage_host_groups-ge.adoc[]
+
+:sectnums:
+include::Chapters/CH1/ch01_09_manage_sudo_rules-ge.adoc[]

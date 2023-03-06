@@ -1,0 +1,264 @@
+:pygments-style: tango
+:source-highlighter: pygments
+:toc:
+:toclevels: 7
+:sectnums:
+:sectnumlevels: 6
+:numbered:
+:chapter-label: ch01_02_rhidm-ansible-prepare-practice
+:icons: font
+ifndef::env-github[:icons: font]
+ifdef::env-github[]
+:status:
+:outfilesuffix: .adoc
+:caution-caption: :fire:
+:important-caption: :exclamation:
+:note-caption: :paperclip:
+:tip-caption: :bulb:
+:warning-caption: :warning:
+endif::[]
+:imagesdir: ./images/
+
+[id='ch01_02_rhidm-ansible-prepare-practice']
+= Prepare your Ansible controller node
+
+== Outcomes
+
+You should be able to
+
+* Prepare your workstation VM to act as a controller node for configuring IdM with Ansible
+* Install packages needed by the Ansible modules
+* Prepare the necessary directories structures and the inventory file
+* Store secrets in vaults and create variable files for the global configuration
+
+=== Prerequisites
+
+If you did not reset classroom systems prior running this exercise, please reset them now.
+When your classroom systems are on-line again, logging on the `workstation` machine as the `student` user and run the following commands:
+
+[subs=+quotes]
+----
+[student@workstation ~]$ *lab ad-trust setup*
+[student@workstation ~]$ *lab manage-clients setup*
+----
+
+[role='Checklist']
+== Instructions
+
+1) Install required packages
+
+1.1) Install packages from lab's repositories
+[subs=+quotes]
+----
+[student@workstation ~]$ *sudo yum install -y git python-virtualenv gcc libffi-devel openssl-devel*
+
+Transaction Summary
+
+...output ommitted...
+
+Is this ok [y/d/N]: *y*
+
+Downloading Packages:
+
+...output ommitted...
+
+Complete!
+----
+
+1.2) Download `python2-babel` and `python2-jinja2` packages from the CentOS Community Build Service
+[subs=+quotes]
+----
+[student@workstation ~]$ *wget --no-check-certificate https://cbs.centos.org/kojifiles/packages/babel/2.6.0/4.el7/noarch/python2-babel-2.6.0-4.el7.noarch.rpm*
+
+[student@workstation ~]$ *wget https://cbs.centos.org/kojifiles/packages/python-jinja2/2.8.1/1.el7/noarch/python2-jinja2-2.8.1-1.el7.noarch.rpm --no-check-certificate*
+----
+
+1.3) Install the python libraries
+[subs=+quotes]
+----
+[student@workstation ~]$ *sudo yum install -y \
+  ./python2-jinja2-2.8.1-1.el7.noarch.rpm
+  ./python2-babel-2.6.0-4.el7.noarch.rpm*
+[sudo] password for student: *student*
+
+...output ommitted...
+
+Complete!
+----
+
+2) Configure vim for Ansible
+
+Configure `vim` to handle tabs as spaces and define tab space to 2 characters.
+
+[subs=+quotes]
+----
+[student@workstation ~]$ *vim ~/.vimrc*
+*autocmd FileType yaml setlocal ai ts=2 sw=2 et*
+----
+
+3) Create an Ansible Virtual Environment
+
+[NOTE]
+====
+Our classroom environment has an old version of Ansible which is not supported from the `ansible-freeipa` modules. Thus, we need to create a Python Virtual Environment on which we will install the necessary packages via `pip`.
+
+Moreover, the version of RHEL is old and most of the python packages are outdated. Thus, we need to download, compile and install some of them.
+====
+
+[subs=+quotes]
+----
+[student@workstation ~]$ *mkdir ~/venvs*
+[student@workstation ~]$ *cd ~/venvs*
+[student@workstation venvs]$ *virtualenv ./ansible2.9 --system-site-packages *
+Installing Setuptools.....................................................................................................................................................done.
+Installing Pip....................................................................................................................................done.
+
+----
+
+3) Use the virtual environment. *Download* a newer but compatible version of *pip*, *extract* the archive and *install* it manually.
+
+[subs=+quotes]
+----
+[student@workstation venvs]$ *source ./ansible2.9/bin/activate*
+(ansible2.9)[student@workstation venvs]$ *wget -q https://github.com/pypa/pip/archive/refs/tags/6.0.tar.gz -O pip-6.0.tar.gz*
+
+(ansible2.9)[student@workstation venvs]$ *tar zxf pip-6.0.tar.gz*
+
+(ansible2.9)[student@workstation pip-6.0]$ *cd ./pip-6.0*
+(ansible2.9)[student@workstation pip-6.0]$ *python setup.py -q install*
+warning: no previously-included files found matching '.coveragerc'
+...output ommitted...
+no previously-included directories found matching 'tests'
+----
+
+4) Install and upgrade python libraries
+
+[subs=+quotes]
+----
+(ansible2.9)[student@workstation venvs]$ *cd ~/venvs*
+(ansible2.9)[student@workstation venvs]$ *pip -q install setuptools==18.5*
+You are using pip version 6.0, however version 23.0.1 is available.
+You should consider upgrading via the 'pip install --upgrade pip' command. <1>
+
+----
+<1> You can safely ignore this message, we run a very old version of RHEL.
+
+5) Install Ansible 2.9
+[subs=+quotes]
+----
+(ansible2.9)[student@workstation venvs]$ *pip -q install ansible==2.9*
+Collecting ansible==2.9
+  Downloading ansible-2.9.0.tar.gz (14.1 MB)
+...output ommitted...
+Successfully installed ansible-2.9.0
+----
+
+5) Verify ansible's version
+[subs=+quotes]
+----
+(ansible2.9)[student@workstation venvs]$ *cd*
+(ansible2.9)[student@workstation ~]$ *ansible --version*
+ansible 2.9.0
+  config file = /etc/ansible/ansible.cfg
+  configured module search path = [u'/home/student/.ansible/plugins/modules', u'/usr/share/ansible/plugins/modules']
+  ansible python module location = /home/student/venvs/ansible2.9/lib/python2.7/site-packages/ansible
+  executable location = /home/student/venvs/ansible2.9/bin/ansible
+  python version = 2.7.5 (default, May  3 2017, 07:55:04) [GCC 4.8.5 20150623 (Red Hat 4.8.5-14)]
+
+----
+
+6) Create the necessary directory structure for the automation
+
+[subs="+quotes"]
+----
+(ansible2.9)[student@workstation venvs]$ *cd*
+(ansible2.9)[student@workstation ~]$ *mkdir -p /home/student/workshop/idm-inventory*
+(ansible2.9)[student@workstation ~]$ *mkdir -p /home/student/workshop/idm-code*
+----
+
+7) Switch to the inventory directory and **create** its structure.
+
+[subs=+quotes]
+----
+(ansible2.9)[student@workstation ~]$ *cd /home/student/workshop/idm-inventory*
+(ansible2.9)[student@workstation idm-inventory]$ *mkdir ./group_vars ./host_vars*
+----
+
+8) **Create** the inventory file called `inventory` with the following information:
+
+* A group named `rhidms` which will contain all RH IdM servers in our lab (idm, replica1, replica2)
+* A group named `rhidm_master` which will contain the `idm` server
+* A group named `rhidm_replicas` which will contain the `replica` and `replica2` servers
+* A group named `all` which will contain all the IdM servers in our lab with their FQDN
+
+[subs=+quotes]
+----
+(ansible2.9)[student@workstation idm-inventory]$ *vim inventory*
+*[all]
+idm.lab.example.net
+replica1.lab.example.net
+replica2.lab.example.net
+
+[rhidm_master]
+idm.lab.example.net
+
+[rhidm_replicas]
+replica1.lab.example.net
+replica2.lab.example.net
+
+[rhidms:children]
+rhidm_master
+rhidm_replicas*
+----
+
+9) **Test** the inventory and **connectivity** to the clients
+
+[subs=+quotes]
+----
+(ansible2.9)[student@workstation idm-inventory]$ *ansible -i ./inventory --graph*
+@all:
+  |--@rhidms:
+  |  |--@rhidm_master:
+  |  |--|--idm.lab.example.net
+  |  |--@rhidm_replicas:
+  |  |--|--replica1.lab.example.net
+  |  |--|--replica2.lab.example.net
+  |--@ungrouped:
+
+(ansible2.9)[student@workstation idm-inventory]$ *ansible -i ./inventory -m ping rhidms*
+
+idm.lab.example.net| SUCCESS => {
+    "changed": false,
+    "ping": "pong"
+}
+replica1.lab.example.net| SUCCESS => {
+    "changed": false,
+    "ping": "pong"
+}
+replica2.lab.example.net| SUCCESS => {
+    "changed": false,
+    "ping": "pong"
+}
+
+----
+
+10) **Create** a new directory under **group_vars** for the **rhidms** group.
+[subs=+quotes]
+----
+(ansible2.9)[student@workstation idm-inventory]$ *mkdir ./group_vars/rhidms*
+----
+
+
+This concludes the section.
+
+
+
+This concludes the section.
+
+XX) Clone the code repositories
+
+[subs=+quotes]
+----
+(ansible2.9)[student@workstation idm-inventory]$ *cd ~/workshop/idm-code*
+(ansible2.9)[student@workstation idm-code]$ *git clone https://github.com/p-tselios/idm-wshop.git ./*
+----

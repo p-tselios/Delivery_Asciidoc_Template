@@ -1,0 +1,264 @@
+:pygments-style: tango
+:source-highlighter: pygments
+:toc:
+:toclevels: 7
+:sectnums:
+:sectnumlevels: 6
+:numbered:
+:chapter-label: ch01_08_manage_host_groups-ge
+:icons: font
+ifndef::env-github[:icons: font]
+ifdef::env-github[]
+:status:
+:outfilesuffix: .adoc
+:caution-caption: :fire:
+:important-caption: :exclamation:
+:note-caption: :paperclip:
+:tip-caption: :bulb:
+:warning-caption: :warning:
+endif::[]
+:imagesdir: ./images/
+
+
+[id='ch01_08_manage_host_groups-ge']
+= Guided Exercise: Manage hosts and Host groups in IdM
+
+== Outcomes
+You should be able to:
+
+* Create, delete and modify host groups
+* Manage Automember rules for Host Groups
+* Create HBAC Rules for host groups
+
+=== Prerequisites
+
+You have successfully completed the previous Guided Exercises.
+
+TIP: Opening two tabs in the Gnome Terminal can help you to easily switch between the `idm-inventory` and `idm-code` directories.
+
+
+[role='Checklist']
+== Instructions
+
+1) Login to your workstation as **student** user and open a new terminal. Ensure that you use the `ansible2.9` Python virtual environment.
+[subs=+quotes]
+----
+[student@workstation ~]$ *source ~/venvs/ansible2.9/bin/activate*
+(ansible2.9)[student@workstation ~]$
+
+----
+
+2) Navigate to the `workshop/idm-code` directory.
+[subs=+quotes]
+----
+(ansible2.9)[student@workstation ~]$ *cd ~/workshop/idm-code*
+
+----
+
+3) Examing the role `rhidm_manage_hosts`
+
+3.1) Examine the default values of the role's variables. Note the name and the structure of the variables used by the role.
+
+[subs=+quotes]
+----
+(ansible2.9)[student@workstation ~]$ *cat ~/workshop/idm-code/roles/rhidm_manage_hosts/defaults/main.yml*
+
+----
+
+3.2 Examine the task file to identify the mandatory variables
+[subs=+quotes]
+----
+(ansible2.9)[student@workstation ~]$ *cat ~/workshop/idm-code/roles/rhidm_manage_hosts/tasks/main.yml*
+
+----
+
+4) Update the host information of `client.lab.example.net` to
+
+* Have the description "Workstop client"
+* Containt the env=prod;app=mysql;deployment_env=prod; in its userclass attribute Have the description
+
+4.1) Create a directory under the `host_vars` if needed in the inventory.
+[subs=+quotes]
+----
+(ansible2.9)[student@workstation ~]$ *mkdir -p ~/workshop/idm-inventory/host_vars/client.lab.example.net*
+----
+
+4.2) Create a variable file with the name `host_data.yml` with the following variables defined:
+[subs=+quotes]
+----
+(ansible2.9)[student@workstation ~]$ *vim ~/workshop/idm-inventory/host_vars/client.lab.example.net/host_info.yml*
+----
+[source,yaml]
+----
+---
+host_description: "Mysql - Production server"
+host_userclass: 'env=prod;app=mysql;deployment_env=prod'
+...
+
+----
+
+4.3) Update the inventory to include the IdM clients group and hosts
+[subs=+quotes]
+----
+(ansible2.9)[student@workstation ~]$ *vim ~/workshop/idm-inventory/inventory
+ ...output ommitted...
+
+[rhidm_clients]
+client.lab.example.net
+----
+
+5) Create a list of dictionaries that will represent the IdM host groups as defined in the following table:
+
+[cols="5", options="header"]
+|===
+|Group Name | Description | Hosts | Automember Rule | Include Rule
+| wsclients | Workstop clients | client.lab.example.net | Yes | env=prod;app=mysql;deployment_env=prod
+|===
+
+5.1 Create a new file in the IdM inventory that will store the host group information.
+[subs=+quotes]
+----
+(ansible2.9)[student@workstation ~]$ *vim ~/workshop/idm-inventory/group_vars/rhidms/rhidm_hgroup_data.yml*
+----
+
+[source,yaml]
+----
+---
+rhidm_hostgroups:
+  - name: "wsclients"
+    description: "Workstop clients"
+    automember: true
+    automember_incrules:
+      - key: userclass
+        expr: 'env=prod;app=mysql;deployment_env=prod'
+...
+----
+
+6. Create a list of dictionaries that will represent the IdM HBAC rules as defined in the following table:
+
+[cols="7", options="header"]
+|===
+| HBAC Name | State | Hosts | Host Groups | Users | Groups | Services
+| all_all | Disabled | N/A | N/A | N/A | N/A | N/A
+| allow_client | Enabled | N/A | wsclients | N/A | wsgroup01 | All
+|===
+
+The `allow_client` rule should allow only users that are members of the `wsgroup01` to access hosts that belong to the host group `wsclients` to connect to it. All other users should not be able to login to the host.
+
+6.1) Create a new file in the IdM inventory that will store the HBAC information.
+[subs=+quotes]
+----
+(ansible2.9)[student@workstation ~]$ *vim ~/workshop/idm-inventory/group_vars/rhidms/rhidm_hbac.yml*
+----
+
+[source,yaml]
+----
+---
+rhidm_hbac_rules:
+  - name: allow_all
+    state: disabled
+
+  - name: allow_client
+    hostgroup: wsclients
+    group: wsgroup01
+...
+----
+
+7) Include the roles `rhidm_manage_hosts` and `rhidm_manage_hbac` in your playbook and execute it
+
+7.1) Modify the playbook `+type__rhidm__configure.yml+` to include the role `rhidm_manage_users`
+[subs="verbatim,macros"]
+----
+
+pass:q[[student@workstation ~\]$ *vim  /home/student/workshop/idm-code/type*]__pass:q[*rhidm*]__pass:q[*configure.yml*]
+---
+- name: Configure the RH IDM domain
+  hosts: "{{ __config_host | groups['rhidms_master'][0] | default('localhost') }}"
+  roles:
+    - role: rhidm_configure
+      tags: idm_conf
+
+    - role: rhidm_manage_users
+      tags: idm_users
+
+    - role: rhidm_manage_groups
+      tags: idm_groups
+
+    - role: rhidm_manage_hosts
+      tags: idm_hosts
+
+    - role: rhidm_manage_hbac
+      tags: idm_hbac
+...
+----
+
+7.2) Execute the playbook to manage hosts
+
+[subs="verbatim,macros"]
+----
+pass:q[(ansible2.9)[student@workstation ~\]$ *cd ~/workshop/idm-code/*]
+pass:q[(ansible2.9)[student@workstation ~\]$ *ansible-playbook --ask-vault-pass \
+ -i ../idm-inventory ./type*]__pass:q[*rhidm*]__pass:q[*configure.yml*]
+
+ ...output ommitted...
+
+TASK [rhidm_manage_hosts : Update host data] *************************************************************************************
+changed: [idm.lab.example.net] => (item=client.lab.example.net)
+
+TASK [rhidm_manage_hosts : Manage the host groups] *******************************************************************************
+changed: [idm.lab.example.net] => (item=wsclients - present)
+
+TASK [rhidm_manage_hosts : Build the automember variables] ***********************************************************************
+ok: [idm.lab.example.net]
+
+TASK [rhidm_manage_hosts : Create or delete Automember rules for Hosts] **********************************************************
+changed: [idm.lab.example.net] => (item=wsclients - present)
+
+...output ommitted...
+TASK [rhidm_manage_hbac : Manage HBAC rules] *************************************************************************************
+changed: [idm.lab.example.net] => (item=allow_all)
+changed: [idm.lab.example.net] => (item=allow_client)
+
+TASK [rhidm_manage_hbac : Manage HBAC membership] ********************************************************************************
+ok: [idm.lab.example.net] => (item=allow_client)
+
+PLAY RECAP ***********************************************************************************************************************
+idm.lab.example.net        : ok=19   changed=6    unreachable=0    failed=0    skipped=3    rescued=0    ignored=0
+
+----
+
+8) Login to idm server, obtain a Kerberos ticket for the admin user and verify the above actions
+[subs=+quotes]
+----
+(ansible2.9)[student@workstation ~]$ *ssh idm*
+[student@idm ~]$ kinit admin
+Password for admin@LAB.EXAMPLE.NET: *RedHat123^*
+
+[student@idm ~]$ *ipa host-show client.lab.example.net*
+  Host name: client.lab.example.net
+  Description: *Mysql*
+  Principal name: host/client.lab.example.net@LAB.EXAMPLE.NET
+  Principal alias: host/client.lab.example.net@LAB.EXAMPLE.NET
+  SSH public key fingerprint: SHA256:SKPbFqfD9FC9OOBraDzDLrXjAqfmRPYl99C7Cn3zak0 (ssh-rsa), SHA256:lXmpBW0vCfgwrSGzb0qS9KzIlg2fTmp8k/lIsuCW21Q
+                              (ecdsa-sha2-nistp256), SHA256:lfaB68WElm4Pg78ryMo6yNL3cYxZmpE4dH10s2LhgRU (ssh-ed25519)
+  Class: *env=prod;app=mysql;deployment_env=prod*
+  Assigned ID View: adview
+  Password: False
+  Member of host-groups: *wsclients*
+  Indirect Member of HBAC rule: *allow_client*
+  Keytab: True
+  Managed by: client.lab.example.net
+
+[student@idm ~]$ *ipa hbacrule-show allow_all*
+  Rule name: allow_all
+  User category: all
+  Host category: all
+  Service category: all
+  Description: Allow all users to access any host from any host
+  Enabled: *FALSE*
+
+[student@idm ~]$ *logout*
+(ansible2.9)[student@workstation ~]$
+----
+
+This concludes the section.
